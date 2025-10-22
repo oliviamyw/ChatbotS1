@@ -4,3 +4,9 @@ langchain
 langchain-community
 langchain-openai
 chromadb
+supabase-py
+python-dotenv
+pathlib
+tiktoken
+requests
+pandas
