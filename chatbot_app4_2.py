@@ -1,30 +1,65 @@
 # =========================
-# Chatbot App 4 — RAG + Rules + Pending Intents
-# Scenario-aware Auto-Pending + Global Intent Switch/Inline Answers (Final)
+# Chatbot App with Name and Picture + Mass-market — RAG + Rules + Pending Intents
+# Natural UI flow (no explicit step sections)
 # =========================
 
 # --- Imports ---
 import os
 import re
-import csv
 import uuid
 import datetime
 from pathlib import Path
 
 import streamlit as st
 from openai import OpenAI
+from supabase import create_client
 
 # LangChain / Vector
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 
 
 # =========================
-# Streamlit Page Config
+# Streamlit Page Config (place early)
 # =========================
-st.set_page_config(page_title="Chatbot Experiment", layout="centered")
+st.set_page_config(page_title="Style Loom — Chatbot Experiment", layout="centered")
+
+
+# =========================
+# Session-state initialization (must be above any session_state usage)
+# =========================
+defaults = {
+    "chat_history": [],
+    "session_id": uuid.uuid4().hex[:10],     # 새 세션마다 생성
+    "awaiting_feedback": False,
+    "ended": False,
+    "saved_fpath": None,
+    "rating_saved": False,
+    "greeted_once": False,
+    "scenario_selected_once": False,
+    "last_user_selected_scenario": "— Select a scenario —",
+    "user_turns": 0,
+    "bot_turns": 0,
+    "closing_asked": False,
+    "flow": {
+        "scenario": None, "stage": "start",
+        "slots": {
+            "product": None, "color": None, "size": None,
+            "contact_pref": None, "tier_known": None, "selected_collection": None,
+            "return_item": None, "received_date": None, "return_reason": None
+        }
+    },
+    "pending": {"intent": None, "data": {}},
+    "session_meta_logged": False,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# 최소 대화 턴 수
+MIN_USER_TURNS = 5
 
 
 # =========================
@@ -38,175 +73,90 @@ client = OpenAI(api_key=API_KEY)
 
 
 # =========================
-# Session State Initialization
+# Supabase Client (single, cached)
 # =========================
-st.session_state.setdefault("chat_history", [])
-st.session_state.setdefault("session_id", uuid.uuid4().hex[:10])
-st.session_state.setdefault("log_dir", "logs")
-os.makedirs(st.session_state.log_dir, exist_ok=True)
-st.session_state.setdefault("awaiting_feedback", False)
-st.session_state.setdefault("ended", False)
-st.session_state.setdefault("saved_fpath", None)
-st.session_state.setdefault("rating_saved", False)
-st.session_state.setdefault("greeted_once", False)          # greet only once
-st.session_state.setdefault("scenario_selected_once", False)
-st.session_state.setdefault("last_user_selected_scenario", "— Select a scenario —")
-MIN_USER_TURNS = 5
-st.session_state.setdefault("user_turns", 0)
-st.session_state.setdefault("bot_turns", 0)
-st.session_state.setdefault("closing_asked", False)
+SUPA_URL = st.secrets.get("SUPABASE_URL")
+SUPA_KEY = st.secrets.get("SUPABASE_ANON_KEY")
 
-# Flow/slots container (stage starts at 'start')
-st.session_state.setdefault("flow", {
-    "scenario": None, "stage": "start",
-    "slots": {
-        "product": None, "color": None, "size": None,
-        "contact_pref": None, "tier_known": None, "selected_collection": None,
-        # returns flow
-        "return_item": None, "received_date": None, "return_reason": None
-    }
-})
+if not SUPA_URL or not SUPA_KEY:
+    st.error("Supabase credentials are missing. Please set SUPABASE_URL and SUPABASE_ANON_KEY in st.secrets.")
+    st.stop()
 
-# ---- Pending yes/no intents (global) ----
-st.session_state.setdefault("pending", {"intent": None, "data": {}})
+@st.cache_resource(show_spinner=False)
+def get_supabase():
+    return create_client(SUPA_URL, SUPA_KEY)
 
-def set_pending(intent: str, data: dict | None = None):
-    st.session_state.pending = {"intent": intent, "data": (data or {})}
-
-def consume_pending():
-    p = st.session_state.pending
-    st.session_state.pending = {"intent": None, "data": {}}
-    return p
-
-def ask_yesno(intent: str, message: str, data: dict | None = None) -> str:
-    """Emit a yes/no question and set a pending intent that will consume the next yes/no reply."""
-    set_pending(intent, data or {})
-    return message
+supabase = get_supabase()
 
 
 # =========================
-# UI: Header & Identity
+# Branding (small, logo-like)
 # =========================
-st.title("🤖 Chatbot User Engagement Experiment")
-st.markdown("Please choose your chatbot settings below:")
-
-# --- Identity & greeting (drop-in replacement) ---
-identity_option = st.radio(
-    "Choose the chatbot identity:",
-    options=["No name or image", "With name only", "With image only", "With name and image"],
-    index=0  # default: No name
+st.markdown(
+    """
+    <div style="display:flex;align-items:center;gap:8px;margin:8px 0 4px 0;">
+        <div style="font-weight:700;font-size:20px;letter-spacing:0.3px;">Style Loom</div>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
-show_name = identity_option in ["With name only", "With name and image"]
-show_picture = identity_option in ["With image only", "With name and image"]
-CHATBOT_NAME = "Riley" if show_name else ""
-CHATBOT_PICTURE = "https://i.imgur.com/4uLz4FZ.png" if show_picture else None
 
-# Speaker label: With name → Riley, Without name → Chatbot
+
+# =========================
+# Identity
+# =========================
+identity_option = "With name and image"
+show_name = True
+show_picture = True
+CHATBOT_NAME = "Skyler"
+CHATBOT_PICTURE = "https://i.imgur.com/4uLz4FZ.png"
+brand_type = "Mass-market Brand"
+
 def _chatbot_speaker():
-    return "Riley" if show_name else "Chatbot"
+    return CHATBOT_NAME
 
-# Normalize past messages when identity setting changes (relabel + adjust greeting text)
-st.session_state.setdefault("last_identity_option", identity_option)
-if st.session_state.last_identity_option != identity_option:
-    st.session_state.last_identity_option = identity_option
-
-    def inject_name(text: str) -> str:
-        # Turn nameless greeting into named one when switching TO name-present
-        if "Riley" in text:
-            return text
-        replacements = [
-            ("Hi, I'm Style Loom’s virtual assistant", "Hi, I'm Riley, Style Loom’s virtual assistant"),
-            ("Hi, I am Style Loom’s virtual assistant", "Hi, I am Riley, Style Loom’s virtual assistant"),
-            ("Hi, I’m Style Loom’s virtual assistant", "Hi, I’m Riley, Style Loom’s virtual assistant"),
-        ]
-        for old, new in replacements:
-            if old in text:
-                return text.replace(old, new)
-        return text
-
-    def remove_name(text: str) -> str:
-        # Remove only the personal name from greeting when switching TO no-name
-        patterns = [
-            ("Hi, I'm Riley, ", "Hi, I'm "),
-            ("Hi, I am Riley, ", "Hi, I am "),
-            ("Hi, I’m Riley, ", "Hi, I’m "),
-        ]
-        for old, new in patterns:
-            text = text.replace(old, new)
-        return text
-
-    new_history = []
-    for spk, msg in st.session_state.chat_history:
-        if spk in ("Chatbot", "Riley"):
-            new_spk = "Riley" if show_name else "Chatbot"
-            new_msg = inject_name(msg) if show_name else remove_name(msg)
-        else:
-            new_spk, new_msg = spk, msg
-        new_history.append((new_spk, new_msg))
-    st.session_state.chat_history = new_history
-
-# Optional profile image
 if show_picture:
     try:
-        st.image(CHATBOT_PICTURE, width=100)
+        st.image(CHATBOT_PICTURE, width=84)
     except Exception:
-        st.warning("Profile image could not be loaded.")
+        pass
 
-# Initial greeting (runs once)
+
+# =========================
+# Initial greeting (appears first in chat)
+# =========================
 if not st.session_state.greeted_once:
     greet_text = (
-        "Hi, I'm Riley, Style Loom’s virtual assistant. I’m here to help with your shopping."
-        if show_name
-        else "Hi, I'm Style Loom’s virtual assistant. I’m here to help with your shopping."
+        "Hi, I'm Skyler, Style Loom’s virtual assistant. "
+        "Style Loom is a mass-market fashion brand founded twenty years ago, "
+        "known for its accessibility and broad consumer reach. "
+        "I’m here to help with your shopping."
     )
     st.session_state.chat_history.append((_chatbot_speaker(), greet_text))
     st.session_state.greeted_once = True
 
 
-# =========================
-# Scenarios (with placeholder; announce only when user selects)
-# =========================
-st.markdown("### How can I help?")
-
-SCENARIOS = [
-    "— Select a scenario —",          # placeholder
-    "Check product availability",
-    "Shipping & returns",
-    "Size & fit guidance",
-    "New arrivals & collections",
-    "Rewards & membership",
-    "Discounts & promotions",
-    "About the brand",
-    "Other"
-]
-
-scenario = st.selectbox("Choose one:", SCENARIOS, index=0)
-
-other_goal = ""
-if scenario == "Other":
-    other_goal = st.text_input("If 'Other', briefly describe your goal (optional)")
-
-# When the user selects a real scenario (not placeholder), announce once and reset flow for that scenario
-if (
-    scenario != "— Select a scenario —"
-    and st.session_state.last_user_selected_scenario != scenario
-):
-    st.session_state.scenario_selected_once = True
-    st.session_state.last_user_selected_scenario = scenario
-
-    # Reset flow for the newly selected scenario
-    st.session_state.flow = {
-        "scenario": scenario, "stage": "start",
-        "slots": {
-            "product": None, "color": None, "size": None,
-            "contact_pref": None, "tier_known": None, "selected_collection": None,
-            "return_item": None, "received_date": None, "return_reason": None
-        }
+# --- Record session meta to Supabase (run once at start) ---
+if not st.session_state.session_meta_logged:
+    _payload = {
+        "session_id": st.session_state.session_id,
+        "ts_start": datetime.datetime.utcnow().isoformat() + "Z",
+        "identity_option": identity_option,
+        "brand_type": brand_type,
+        "name_present": "present",
+        "picture_present": "present",
+        "scenario": st.session_state.flow.get("scenario") or None,
+        "user_turns": st.session_state.user_turns,
+        "bot_turns": st.session_state.bot_turns,
     }
-
-    st.session_state.chat_history.append(
-        (_chatbot_speaker(), f"Sure, I will help you with **{scenario}**. Please ask me a question.")
-    )
+    try:
+        supabase.table("sessions").insert(_payload).execute()
+        st.session_state.session_meta_logged = True
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "unique" in str(e).lower():
+            st.session_state.session_meta_logged = True
+        else:
+            st.warning(f"(non-blocking) Failed to insert session meta: {e}")
 
 
 # =========================
@@ -226,20 +176,61 @@ PRODUCT_CATEGORIES = [
 
 
 # =========================
-# Regex & Slot Extractors
+# Regex & Extractors
 # =========================
 YES_PAT = re.compile(r"\b(yes|yeah|yep|sure|ok|okay|please)\b", re.I)
 NO_PAT  = re.compile(r"\b(no|nope|nah|not now|later)\b", re.I)
 
+def _is_size_chart_query(t: str) -> bool:
+    """Detects 'size chart/guide' style questions anywhere in the text."""
+    return bool(re.search(
+        r"\b(size\s*(chart|guide)|sizing\s*(chart|guide)?|size\s*info|measurement(s)?)\b",
+        t or "", re.I
+    ))
+
+def _preprocess_user_text(t: str) -> str:
+    """Light normalization: common typos, synonyms, season words, and separators."""
+    s = (t or "").strip()
+
+    # 공백/슬래시 정리
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\s*/\s*", " / ", s)  # "City Knit / s" → "City Knit / s"
+
+    # 계절/수식어(제품 추론에 불필요) 제거
+    seasonals = [
+        r"\bfall\b", r"\bautumn\b", r"\bwinter\b", r"\bspring\b", r"\bsummer\b",
+        r"\bnew\b", r"\blatest\b", r"\brecent\b", r"\bcollection\b", r"\bnew\s+arrivals?\b"
+    ]
+    for pat in seasonals:
+        s = re.sub(pat, " ", s, flags=re.I)
+
+    # 자주 나오는 오타 보정
+    fixes = {
+        r"\boatmilk\b": "oatmeal",
+        r"\boat meal\b": "oatmeal",
+        r"\bgre(y|ie)ge\b": "greige",
+    }
+    for pat, repl in fixes.items():
+        s = re.sub(pat, repl, s, flags=re.I)
+
+    # 대표 제품명은 대소문자 섞여도 표준 표기로 정규화
+    s = re.sub(r"\bcity\s+knit\b", "City Knit", s, flags=re.I)
+    s = re.sub(r"\bsoft\s+blouse\b", "Soft Blouse", s, flags=re.I)
+    s = re.sub(r"\beveryday\s+jacket\b", "Everyday Jacket", s, flags=re.I)
+    s = re.sub(r"\btailored\s+pants?\b", "Tailored Pants", s, flags=re.I)
+    s = re.sub(r"\bweekend\s+dress\b", "Weekend Dress", s, flags=re.I)
+
+    return s.strip()
+
 def extract_color(t: str):
     m = re.search(
         r"\b(black|white|ivory|navy|blue|mist\s?blue|greige|beige|red|green|rose\s?beige|pink|cream|sand|olive|charcoal|oatmeal|forest|berry|ink|brown|purple|orange|yellow|khaki|teal|burgundy|maroon|grey|gray)\b",
-        t, re.I
+        t or "", re.I
     )
     return m.group(1).lower() if m else None
 
 def extract_size(t: str):
-    text = t.lower()
+    text = (t or "").lower()
     word_map = {
         r"\b(extra\s*small|x[\- ]?small|xs|xxs)\b": "XS",
         r"\b(small|s)\b": "S",
@@ -251,29 +242,72 @@ def extract_size(t: str):
     for pat, label in word_map.items():
         if re.search(pat, text, re.I):
             return label
-    m = re.search(r"\b(XXS|XS|S|M|L|XL|XXL|0|2|4|6|8|10|12|14|16|18)\b", t, re.I)
+    m = re.search(r"\b(XXS|XS|S|M|L|XL|XXL|0|2|4|6|8|10|12|14|16|18)\b", t or "", re.I)
     return m.group(1).upper() if m else None
 
 def extract_product(t: str):
-    cats = ["blouse", "skirt", "pants", "cardigan", "cardigans", "sweater", "sweaters",
-            "dress", "dresses", "jumpsuit", "jumpsuits", "jacket", "jackets",
-            "t-shirt", "t-shirts", "sweatshirt", "sweatpants", "outer", "coat",
-            "trench", "trenches", "top", "tops", "bodysuit", "bodysuits",
-            "activewear", "shirt", "shirts", "shorts", "lingerie"]
+    text = _preprocess_user_text(t)
+    low  = text.lower()
+
+    # 1) 명명된 라인업(정확 표기 우선)
+    named = [
+        "City Knit",
+        "Soft Blouse",
+        "Everyday Jacket",
+        "Tailored Pants",
+        "Weekend Dress",
+    ]
+    for name in named:
+        if re.search(rf"\b{re.escape(name)}\b", text, re.I):
+            return name
+
+    # 2) 느슨한 키워드/동의어 → 대표 카테고리로 매핑
+    #    예: knit → sweater (City Knit가 문맥에 있으면 City Knit)
+    if "knit" in low:
+        if "city" in low:   # "city knit", "city blue knit" 등
+            return "City Knit"
+        return "sweater"     # 일반 니트는 스웨터로 표준화
+
+    if "tee" in low or "t-shirt" in low or "tshirt" in low:
+        return "t-shirt"
+
+    # 3) 일반 카테고리(기존 리스트 유지/보강)
+    cats = [
+        "blouse", "skirt", "pants", "cardigan", "cardigans", "sweater", "sweaters",
+        "dress", "dresses", "jumpsuit", "jumpsuits", "jacket", "jackets",
+        "t-shirt", "t-shirts", "sweatshirt", "sweatpants", "outer", "coat",
+        "trench", "trenches", "top", "tops", "bodysuit", "bodysuits",
+        "activewear", "shirt", "shirts", "shorts", "lingerie"
+    ]
     for c in cats:
-        if re.search(rf"\b{re.escape(c)}\b", t, re.I):
+        if re.search(rf"\b{re.escape(c)}\b", low, re.I):
             if c in ["cardigans", "sweaters", "jackets", "dresses", "tops", "shirts", "jumpsuits"]:
                 return c.rstrip("s")
             return c
-    w = re.search(r"\b(\w+\s+(jacket|skirt|blouse|t-?shirt|dress|pants))\b", t, re.I)
-    return w.group(1) if w else None
+
+    # 4) 두 단어 조합(느슨)
+    w = re.search(r"\b([\w\-]+(?:\s+[\w\-]+)?)\s+(jacket|skirt|blouse|t-?shirt|dress|pants|sweater)\b", text, re.I)
+    if w:
+        # 예: "chunky knit sweater" → "sweater"로 정리
+        noun = w.group(2).lower()
+        return "sweater" if noun in ["sweater"] else noun
+
+    return None
 
 def _update_slots_from_text(user_text: str):
+    cleaned = _preprocess_user_text(user_text)
+
     slots = st.session_state.flow["slots"]
-    p, c, s = extract_product(user_text), extract_color(user_text), extract_size(user_text)
-    if p: slots["product"] = p
-    if c: slots["color"] = c
-    if s: slots["size"] = s
+    p = extract_product(cleaned)
+    c = extract_color(cleaned)
+    s = extract_size(cleaned)
+
+    if p:
+        slots["product"] = p
+    if c:
+        slots["color"] = c
+    if s:
+        slots["size"] = s
 
 
 # =========================
@@ -288,7 +322,7 @@ def maybe_add_one_time_closing(reply: str) -> str:
 
 
 # =========================
-# RAG: Build/Load Vectorstore (autodetect_encoding=True; chardet used)
+# RAG: Build/Load Vectorstore
 # =========================
 RAG_DIR = str(Path.cwd() / "rag_docs")
 
@@ -301,14 +335,12 @@ def build_or_load_vectorstore(rag_dir: str):
     persist_dir = str(rag_path / ".chroma")
     embeddings = OpenAIEmbeddings(api_key=API_KEY, model="text-embedding-3-small")
 
-    # Load existing index
     if Path(persist_dir).exists() and any(Path(persist_dir).iterdir()):
         try:
             return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
         except Exception as e:
             st.warning(f"Vectorstore load warning: {e}")
 
-    # Build new index (autodetect requires chardet)
     try:
         loader = DirectoryLoader(
             rag_dir,
@@ -340,7 +372,7 @@ def build_or_load_vectorstore(rag_dir: str):
 
 vectorstore = build_or_load_vectorstore(RAG_DIR)
 
-def retrieve_context(query: str, k: int = 5) -> str:
+def retrieve_context(query: str, k: int = 6) -> str:
     if not vectorstore:
         return ""
     try:
@@ -367,12 +399,17 @@ def make_query(user_message: str) -> str:
 # =========================
 # LLM (RAG) fallback
 # =========================
+TONE_STYLE = {
+    "informal": "Use a friendly, casual tone. Use emojis.",
+    "formal": "Use a formal, respectful tone. No emojis."
+}
+
 def answer_with_rag(user_message: str) -> str:
     _update_slots_from_text(user_message)
     query = make_query(user_message)
     context = retrieve_context(query, k=6)
 
-    style_instruction = TONE_STYLE[TONE]
+    style_instruction = TONE_STYLE["informal"]
     bot_identity = f"named {CHATBOT_NAME}" if show_name else "with no name"
     prompt = f"""
 You are a helpful customer service chatbot {bot_identity} for Style Loom.
@@ -384,7 +421,7 @@ Do not invent policy, numbers, or SKUs. Keep answers short and helpful.
 === END CONTEXT ===
 
 Meta:
-- Current scenario: {scenario}
+- Current scenario: {st.session_state.flow.get('scenario')}
 - Product categories: {", ".join(PRODUCT_CATEGORIES)}
 - Known slots: {st.session_state.flow["slots"]}
 
@@ -411,15 +448,26 @@ def llm_fallback(user_message: str) -> str:
 
 
 # =========================
-# Pending yes/no router (global)
+# Pending yes/no logic (global)
 # =========================
+def set_pending(intent: str, data: dict | None = None):
+    st.session_state.pending = {"intent": intent, "data": (data or {})}
+
+def consume_pending():
+    p = st.session_state.pending
+    st.session_state.pending = {"intent": None, "data": {}}
+    return p
+
+def ask_yesno(intent: str, message: str, data: dict | None = None) -> str:
+    set_pending(intent, data or {})
+    return message
+
 def handle_pending_yes(user_text: str) -> str | None:
     pend = st.session_state.pending
     intent = pend.get("intent")
     if not intent:
         return None
 
-    # YES
     if YES_PAT.search(user_text):
         if intent == "rewards_more":
             consume_pending()
@@ -468,11 +516,9 @@ def handle_pending_yes(user_text: str) -> str | None:
             consume_pending()
             return "Okay—switching contexts."
 
-        # extend intents as needed
         consume_pending()
         return "Got it."
 
-    # NO
     if NO_PAT.search(user_text):
         if intent == "confirm_switch":
             consume_pending()
@@ -484,13 +530,9 @@ def handle_pending_yes(user_text: str) -> str | None:
 
 
 # =========================
-# A) Auto-pending inference (scenario-aware)
+# Auto-pending inference (scenario-aware)
 # =========================
 def infer_pending_from_bot_reply(reply_text: str) -> None:
-    """
-    Look for yes/no-style follow-ups in the bot reply and set a pending intent,
-    but only if that intent makes sense for the CURRENT SCENARIO.
-    """
     sc = (st.session_state.flow.get("scenario") or "").strip()
     text = (reply_text or "").strip().lower()
     if not text:
@@ -499,7 +541,6 @@ def infer_pending_from_bot_reply(reply_text: str) -> None:
     def _match_any(patterns):
         return any(re.search(p, text, re.I) for p in patterns)
 
-    # Rewards follow-ups (earn/redeem)
     if sc == "Rewards & membership":
         if _match_any([
             r"\bwant to know\b.*\b(earn|earning|redeem|redemption|points|rewards)\b",
@@ -508,7 +549,6 @@ def infer_pending_from_bot_reply(reply_text: str) -> None:
             set_pending("rewards_more")
             return
 
-    # Product availability / Size & fit: colors & sizes follow-ups
     if sc in ("Check product availability", "Size & fit guidance"):
         if _match_any([
             r"\bwant to know\b.*\b(color|colors|size|sizes)\b",
@@ -517,20 +557,18 @@ def infer_pending_from_bot_reply(reply_text: str) -> None:
         ]):
             set_pending("colors_sizes_more")
             return
-
-    # Shipping & returns 등 기타 시나리오에서는 pending을 설정하지 않음
     return
 
 
 # =========================
-# Rule-based scenario router (deterministic)
+# Rule-based scenario router
 # =========================
 def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
     flow = st.session_state.flow
     slots = flow["slots"]
     stage = flow.get("stage") or "start"
 
-    # Keep extracting slots from free text
+    # 사용자 입력에서 가능한 슬롯 단서 추출(느슨한 추론 포함)
     _update_slots_from_text(user_text)
 
     # ---- Rewards & membership ----
@@ -562,7 +600,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 "- Apply at checkout on the payment step\n"
                 "- Points do not apply to taxes or shipping"
             )
-        return None  # let LLM handle other rewards questions
+        return None
 
     # ---- Check product availability ----
     if current_scenario == "Check product availability":
@@ -572,15 +610,17 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 
         if stage == "collect":
             if not slots.get("product"):
+                # 사용자가 힌트를 준 경우 재시도 추론
+                _update_slots_from_text(user_text)
+            if not slots.get("product"):
                 return "Sure—what product are you looking for (e.g., jacket, dress, t-shirt)?"
             if not slots.get("color"):
                 return f"Great—what color of {slots['product']}?"
             if not slots.get("size"):
                 return f"What size for the {slots['product']} in {slots['color']}?"
-            # all slots present → deterministic message (with follow-up yes/no)
             flow["stage"] = "offer_low_stock_alt"
             return ask_yesno(
-                intent="colors_sizes_more",  # or define a 'low_stock_alt' later
+                intent="colors_sizes_more",
                 message=(
                     f"We have 5+ in stock for the {slots['product']} in {slots['color']} / {slots['size']}. "
                     "However, a different color is running low in stock. Would you also like me to suggest a similar low-stock option?"
@@ -593,7 +633,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 flow["stage"] = "end_or_more"
                 return (
                     f"A similar last-season {slots['product']} in the same {slots['color']} is down to the final 2 pieces. "
-                    f"Would you like a restock alert for the current color/size, or to see similar items?"
+                    "Would you like a restock alert for the current color/size, or to see similar items?"
                 )
             if NO_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
@@ -602,130 +642,195 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 
         if stage == "end_or_more":
             return "Happy to help. If you need anything else, just say the word!"
-
         return None
 
-    # ---- Shipping & returns ----  (robust return flow; no color/size branches here)
+    # ---- Shipping & returns ----
     if current_scenario == "Shipping & returns":
-        if stage in (None, "start"):
-            flow["stage"] = "returns_collect_item"
-            return ("Of course! I can help with a return. "
-                    "What item would you like to return? (e.g., white tennis shoes, size 9)")
+        # ✅ 어디서든 배송 질문이면 먼저 응답 (추가 질문 없이 개요만)
+        if _is_shipping_query(user_text):
+            flow["stage"] = "end_or_more"
+            return (
+                "**Shipping overview**\n"
+                "- Processing: usually 1 business day\n"
+                "- Standard (domestic): about 3–5 business days\n"
+                "- Express (domestic): about 1–2 business days\n"
+                "- International: typically 7–14 business days"
+            )
+        # ▼ 이하 기존 반품 플로우 유지 ...
+
 
         if stage == "returns_collect_item":
             if user_text.strip():
                 flow["slots"]["return_item"] = user_text.strip()
             flow["stage"] = "returns_collect_date"
-            return ("Got it. When did you receive the item? "
-                    "(Please provide a date like 2025-09-10)")
+            return (
+                "Got it. When did you receive the item? "
+                "(Please provide a date like 2025-09-10)"
+            )
 
         if stage == "returns_collect_date":
             m = re.search(r"\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2})\b", user_text)
             flow["slots"]["received_date"] = m.group(1) if m else "unknown"
             flow["stage"] = "returns_condition_check"
-            return ("Thanks. For returns, items must be unworn and in original condition. "
-                    "Can you confirm the item is unworn and in its original condition? (yes/no)")
+            return (
+                "Thanks. For returns, items must be unworn and in original condition. "
+                "Can you confirm the item is unworn and in its original condition? (yes/no)"
+            )
 
         if stage == "returns_condition_check":
             if YES_PAT.search(user_text):
                 flow["stage"] = "returns_reason"
-                return ("Understood. Could you tell me the reason for the return? "
-                        "(e.g., too small, defective, changed mind)")
+                return (
+                    "Understood. Could you tell me the reason for the return? "
+                    "(e.g., too small, defective, changed mind)"
+                )
             if NO_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
-                return ("Unfortunately, we can only accept returns that are unworn and in original condition. "
-                        "If you have questions, I can share our exchange/repair options.")
+                return (
+                    "Unfortunately, we can only accept returns that are unworn and in original condition. "
+                    "If you have questions, I can share our exchange/repair options."
+                )
             return "Please reply yes or no: is the item unworn and in original condition?"
 
         if stage == "returns_reason":
             flow["slots"]["return_reason"] = user_text.strip()
             flow["stage"] = "returns_instructions"
             item = flow["slots"].get("return_item", "the item")
-            return (f"Thanks. To initiate your return for **{item}**, please follow these steps:\n"
-                    "1) I’ll create a prepaid return label for you via email.\n"
-                    "2) Pack the item securely with all tags/accessories.\n"
-                    "3) Drop it off within **14 days** of delivery.\n"
-                    "Once we receive and inspect it, we’ll process your refund to the original payment method.\n"
-                    "Would you like me to send the return label to your email on file? (yes/no)")
+            return (
+                f"Thanks. To initiate your return for **{item}**, please follow these steps:\n"
+                "1) I’ll create a prepaid return label for you via email.\n"
+                "2) Pack the item securely with all tags/accessories.\n"
+                "3) Drop it off within **14 days** of delivery.\n"
+                "Once we receive and inspect it, we’ll process your refund to the original payment method.\n"
+                "Would you like me to send the return label to your email on file? (yes/no)"
+            )
 
         if stage == "returns_instructions":
             if YES_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
-                return ("Great—return label request submitted. You’ll receive it shortly. "
-                        "Is there anything else I can help you with?")
+                return (
+                    "Great—return label request submitted. You’ll receive it shortly. "
+                    "Is there anything else I can help you with?"
+                )
             if NO_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
-                return ("No problem. If you need the label later, just ask. "
-                        "Anything else I can help you with?")
+                return (
+                    "No problem. If you need the label later, just ask. "
+                    "Anything else I can help you with?"
+                )
             return "Would you like me to email you the return label now? (yes/no)"
 
         if stage == "end_or_more":
             return "Happy to help. If you need anything else, just say the word!"
-
         return None
 
-    # ---- Size & fit guidance ----  (numeric-first sizing; avoid M/L if numbers-only)
+    # ---- Size & fit guidance ----  (numeric-first sizing; recommend only with fit signal)
     if current_scenario == "Size & fit guidance":
+        # 0) size chart/guide 질의는 언제나 우선적으로 차트 안내만 제공
+        if _is_size_chart_query(user_text):
+            if stage in (None, "start"):
+                flow["stage"] = "fit_collect"
+            return "You can view our size guide on each product page under **Size & Fit**."
+
         if stage in (None, "start"):
             flow["stage"] = "fit_collect"
-            return ("Sure—tell me your current size and how it fits (e.g., pants 28 too small). "
-                    "I’ll suggest the next size.")
+            return "Sure—tell me your current size and how it fits."
 
         if stage == "fit_collect":
-            num = re.search(r"\b(\d{2}(\.\d)?|\d{1,2}(\.\d)?)\b", user_text)
-            letter = re.search(r"\b(XXS|XS|S|M|L|XL|XXL)\b", user_text, re.I)
+            # 크다/작다 신호
             too_small = re.search(r"\b(too\s*small|tight|snug)\b", user_text, re.I)
             too_big   = re.search(r"\b(too\s*big|loose)\b", user_text, re.I)
-            numbers_only = re.search(r"\bnumbers?\s+only\b", user_text, re.I)
 
+            # 숫자/문자 사이즈 파악
+            num = re.search(r"\b(\d{2}(\.\d)?|\d{1,2}(\.\d)?)\b", user_text)
+            letter = re.search(r"\b(XXS|XS|S|M|L|XL|XXL)\b", user_text, re.I)
+
+            # 1) 숫자 사이즈: fit 신호 있을 때만 증감 추천
             if num:
                 base = num.group(1)
                 try:
                     val = float(base)
-                except:
+                except Exception:
                     val = None
 
-                if val is not None:
+                if val is not None and (too_small or too_big):
                     if too_small:
                         rec = val + 1 if val >= 20 else val + 0.5
-                    elif too_big:
-                        rec = val - 1 if val >= 20 else val - 0.5
                     else:
-                        rec = val + 1
+                        rec = val - 1 if val >= 20 else val - 0.5
                     flow["stage"] = "end_or_more"
-                    return (f"Since **{base}** feels small, try **{rec:.1f}** (or the next up). "
-                            "If the brand runs small, you may need one more size up. "
-                            "Need help finding stock for that size?")
+                    return (
+                        f"Since **{base}** feels {'small' if too_small else 'big'}, try **{rec:.1f}**. "
+                        "Want me to check availability in that size?"
+                    )
+                if val is not None and not (too_small or too_big):
+                    return "Thanks. How does that size fit—**too small, too big, or just right**?"
 
-            if letter and not numbers_only:
+            # 2) 문자 사이즈: fit 신호 있을 때만 다음 사이즈 제안
+            if letter:
                 L = letter.group(1).upper()
-                nxt = {"XXS":"XS","XS":"S","S":"M","M":"L","L":"XL","XL":"XXL"}.get(L,"next size up")
-                flow["stage"] = "end_or_more"
-                return (f"Since **{L}** feels small, try **{nxt}**. "
-                        "Want me to check availability in that size?")
+                if too_small or too_big:
+                    nxt_up = {"XXS": "XS", "XS": "S", "S": "M", "M": "L", "L": "XL", "XL": "XXL"}
+                    nxt_down = {"XXL": "XL", "XL": "L", "L": "M", "M": "S", "S": "XS", "XS": "XXS"}
+                    rec = nxt_up.get(L) if too_small else nxt_down.get(L)
+                    flow["stage"] = "end_or_more"
+                    if rec:
+                        return (
+                            f"Since **{L}** feels {'small' if too_small else 'big'}, try **{rec}**. "
+                            "Want me to check availability in that size?"
+                        )
+                    return (
+                        "Based on your feedback, you may need to adjust one size. "
+                        "Want me to check availability?"
+                    )
 
-            return ("Got it. If your **current size** (e.g., 28, 30, 9) feels small or big, "
-                    "tell me which way, and I’ll recommend the next size up/down.")
+                # 문자 사이즈만 있고 맞음/작음/큼 정보가 없으면 follow-up
+                return f"Got it. How does **{L}** fit—**too small, too big, or just right**?"
+
+            # 3) 아직 충분한 정보가 없으면 가이드 질문 유지
+            return (
+                "To recommend a size, tell me what you usually wear **and** whether it feels "
+                "**too small, too big, or just right**."
+            )
 
         if stage == "end_or_more":
             return "Happy to help. If you need anything else, just say the word!"
-
         return None
 
-    # Other scenarios → let LLM handle
+    # 다른 시나리오에서는 규칙 없음 → LLM/RAG로
     return None
+
 
 
 # =========================
 # Global intent detection (cross-scenario)
 # =========================
+
 GLOBAL_INTENTS = [
     # pattern, intent_key, target_scenario, priority, can_inline
-    (r"\b(return|refund|send back|exchange)\b", "returns_intent", "Shipping & returns", 10, False),
-    (r"\b(exchange|swap size|different size|too (small|big))\b", "fit_intent", "Size & fit guidance", 8, True),
-    (r"\b(availability|in stock|stock|have .* size|colors?|sizes?)\b", "availability_intent", "Check product availability", 7, True),
-    (r"\b(reward|point|redeem|earn|membership|tier)\b", "rewards_intent", "Rewards & membership", 6, True),
+
+    # ✅ 새로 추가: "size chart / size guide" → Size & fit guidance
+    (r"\b(size\s*(chart|guide)|sizing\s*(chart|guide)?|size\s*info|size\s*measurement(s)?)\b",
+     "size_chart_intent", "Size & fit guidance", 9, True),
+
+    # ✅ 새로 추가: 배송 관련 의도 → Shipping & returns
+    (r"\b(ship(ping)?|delivery|deliver|arriv(e|al)|eta|when.*(arrive|get)|how\s+long)\b",
+     "shipping_intent", "Shipping & returns", 9, True),
+
+    (r"\b(return|refund|send back|exchange)\b",
+     "returns_intent", "Shipping & returns", 10, False),
+
+    (r"\b(exchange|swap size|different size|too (small|big))\b",
+     "fit_intent", "Size & fit guidance", 8, True),
+
+    # 수정: size chart/guide 는 availability에서 제외
+    (r"\b(availability|in stock|stock|have .* size|colors?|sizes?(?!\s*(chart|guide)))\b",
+     "availability_intent", "Check product availability", 7, True),
+
+    (r"\b(reward|point|redeem|earn|membership|tier)\b",
+     "rewards_intent", "Rewards & membership", 6, True),
 ]
+
 
 def detect_global_intent(user_text: str):
     text = (user_text or "").lower()
@@ -736,7 +841,22 @@ def detect_global_intent(user_text: str):
                 best = {"key": key, "target": target, "priority": prio, "can_inline": can_inline}
     return best
 
-# Inline short answers (keep current scenario; propose switch)
+
+# =========================
+# Inline answer functions
+# =========================
+
+def inline_answer_shipping(user_text: str) -> str:
+    # 간단한 배송 개요만 제공 (추가 질문 없음)
+    return (
+        "**Shipping overview**\n"
+        "- Processing: usually 1 business day\n"
+        "- Standard (domestic): about 3–5 business days\n"
+        "- Express (domestic): about 1–2 business days\n"
+        "- International: typically 7–14 business days"
+    )
+
+
 def inline_answer_availability(user_text: str) -> str:
     _update_slots_from_text(user_text)
     slots = st.session_state.flow["slots"]
@@ -744,44 +864,74 @@ def inline_answer_availability(user_text: str) -> str:
     c = slots.get("color")
     s = slots.get("size")
     base = f"For the {p}"
-    if c: base += f" in {c}"
-    if s: base += f" / {s}"
+    if c:
+        base += f" in {c}"
+    if s:
+        base += f" / {s}"
     return (
         f"{base}, I can check availability in detail if you like. "
         f"Would you like to **switch to Check product availability**?"
     )
+
 
 def inline_answer_fit(user_text: str) -> str:
     mnum = re.search(r"\b(\d{2}(\.\d)?|\d{1,2}(\.\d)?)\b", user_text)
     if mnum:
         base = float(mnum.group(1))
         rec = base + 1 if base >= 20 else base + 0.5
-        return (f"If **{base:.1f}** feels small, try **{rec:.1f}**. "
-                "Want to **switch to Size & fit guidance** for a precise recommendation?")
+        return (
+            f"If **{base:.1f}** feels small, try **{rec:.1f}**. "
+            "Want to **switch to Size & fit guidance** for a precise recommendation?"
+        )
     return "I can help with sizing. Want to **switch to Size & fit guidance**?"
 
+
 def inline_answer_rewards(user_text: str) -> str:
-    return ("Every 100 pts = $1 off (merchandise subtotal only). Tiers are rolling 12 months; "
-            "points expire after 12 months of no activity. "
-            "Want to **switch to Rewards & membership** to see earning/redeem tips?")
+    return (
+        "Every 100 pts = $1 off (merchandise subtotal only). "
+        "Tiers are rolling 12 months; points expire after 12 months of no activity. "
+        "Want to **switch to Rewards & membership** to see earning/redeem tips?"
+    )
+
+
+def inline_answer_size_chart(user_text: str) -> str:
+    # 간단한 사이즈 표 제공 (Top / Bottom 공용)
+    return (
+        "Here’s our general **Size Guide** (inches):\n\n"
+        "| Size | Bust | Waist | Hip |\n"
+        "|:------:|:------:|:------:|:------:|\n"
+        "| XXS | 30–31 | 23–24 | 33–34 |\n"
+        "| XS  | 32–33 | 25–26 | 35–36 |\n"
+        "| S   | 34–35 | 27–28 | 37–38 |\n"
+        "| M   | 36–37 | 29–30 | 39–40 |\n"
+        "| L   | 38.5–40 | 31.5–33 | 41.5–43 |\n"
+        "| XL  | 41.5–43 | 34.5–36 | 44.5–46 |\n"
+        "| XXL | 44.5–46 | 37.5–39 | 47.5–49 |\n\n"
+    )
+
+
+# =========================
+# Inline handler mapping
+# =========================
 
 INLINE_HANDLERS = {
     "availability_intent": inline_answer_availability,
     "fit_intent": inline_answer_fit,
     "rewards_intent": inline_answer_rewards,
+    "size_chart_intent": inline_answer_size_chart,
+    "shipping_intent": inline_answer_shipping,  # ✅ 새로 추가
 }
+
 
 
 # =========================
 # Orchestrator
 # =========================
 def handle_message(user_text: str) -> str:
-    # 0) pending 우선
     pending_reply = handle_pending_yes(user_text)
     if pending_reply:
         return maybe_add_one_time_closing(pending_reply)
 
-    # 0.5) Global intent pre-check (cross-scenario)
     detected = detect_global_intent(user_text)
     if detected:
         current = st.session_state.flow.get("scenario")
@@ -793,133 +943,220 @@ def handle_message(user_text: str) -> str:
                     reply = inline_fun(user_text)
                     set_pending("confirm_switch", {"target": target})
                     return maybe_add_one_time_closing(reply)
-            # not inline-capable (e.g., returns): ask to switch
             msg = f"It sounds like **{target}** might be more helpful. Switch to that topic?"
             set_pending("confirm_switch", {"target": target})
             return maybe_add_one_time_closing(msg)
-        # same scenario → just continue to rules below
 
-    # 1) Scenario rules
     rule_reply = route_by_scenario(st.session_state.flow.get("scenario") or scenario, user_text)
     if rule_reply is not None:
         infer_pending_from_bot_reply(rule_reply)
         return maybe_add_one_time_closing(rule_reply)
 
-    # 2) RAG + LLM fallback
     bot_reply = llm_fallback(user_text)
     infer_pending_from_bot_reply(bot_reply)
     return maybe_add_one_time_closing(bot_reply)
 
 
 # =========================
-# Chat Loop
+# UI — 전체(인사/채팅 → 시나리오 → 입력/진행/종료/만족도) + 즉시 표시
 # =========================
-if not st.session_state.awaiting_feedback and not st.session_state.ended:
-    with st.form("chat_form", clear_on_submit=True):
-        user_input = st.text_input("Your message:")
-        submitted = st.form_submit_button("Send")
 
-    if submitted and user_input.strip():
-        st.session_state.user_turns += 1
-        st.session_state.chat_history.append(("User", user_input.strip()))
-
-        bot_reply = handle_message(user_input.strip())
-
-        speaker = _chatbot_speaker()
-        st.session_state.chat_history.append((speaker, bot_reply))
-        st.session_state.bot_turns += 1
-
-    if st.session_state.user_turns < MIN_USER_TURNS:
-        remaining = MIN_USER_TURNS - st.session_state.user_turns
-        st.info(f"You’ve sent {st.session_state.user_turns}/{MIN_USER_TURNS} messages (minimum). {remaining} more to go.")
-        st.progress(min(st.session_state.user_turns / MIN_USER_TURNS, 1.0))
-else:
-    if st.session_state.awaiting_feedback and not st.session_state.ended:
-        st.info("This chat is paused. Please complete the quick survey below to finish.")
-    else:
-        st.info("This session has ended. Thank you for your feedback!")
-
-
-# =========================
-# Transcript & Survey
-# =========================
-for speaker, message in st.session_state.chat_history:
-    st.markdown(f"**{speaker}:** {message}")
-
-if st.button("Download Chat Log"):
-    filename = f"chatlog_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.txt"
-    try:
-        with open(filename, "w", encoding="utf-8") as f:
-            for spk, msg in st.session_state.chat_history:
-                f.write(f"{spk}: {msg}\n")
-        st.success("Chat log saved locally (if running on your machine).")
-    except Exception as e:
-        st.error(f"Failed to write chat log: {e}")
-
+# 화면 상단에 렌더링될 영역(고정 순서용 컨테이너) 먼저 배치
+chat_area = st.container()       # 최상단: 채팅(인사 포함)
 st.markdown("---")
-can_end = (st.session_state.user_turns >= MIN_USER_TURNS)
-help_text = None if can_end else f"Please send at least {MIN_USER_TURNS - st.session_state.user_turns} more message(s) before ending."
-if (not st.session_state.awaiting_feedback) and (not st.session_state.ended):
-    if st.button("End Session", disabled=not can_end, help=help_text):
-        st.session_state.awaiting_feedback = True
-        st.success("Session paused. Please answer the quick satisfaction question below to finish.")
+scenario_area = st.container()   # 중간: 시나리오 드롭다운
+st.markdown("---")
+control_area = st.container()    # 하단: 입력/진행/종료(또는 만족도)
 
-if st.session_state.awaiting_feedback and not st.session_state.ended:
-    st.subheader("Before you go…")
-    st.write("**Overall, how satisfied are you with this chatbot service today?**")
-    st.caption("1 = Very dissatisfied, 7 = Very satisfied")
-    rating = st.slider("Your overall satisfaction", min_value=1, max_value=7, value=5, step=1)
+# -------------------------
+# (중간) 시나리오 드롭다운 — 선택 처리
+# -------------------------
+with scenario_area:
+    st.markdown("**How can I help you with?**")
+    SCENARIOS = [
+        "— Select a scenario —",
+        "Check product availability",
+        "Shipping & returns",
+        "Size & fit guidance",
+        "New arrivals & collections",
+        "Rewards & membership",
+        "Discounts & promotions",
+        "About the brand",
+        "Other",
+    ]
+    scenario = st.selectbox("", SCENARIOS, index=0, key="scenario_select")
+    other_goal_input = ""
+    if scenario == "Other":
+        other_goal_input = st.text_input("If 'Other', briefly describe your goal (optional)")
 
-    if st.button("Submit Rating"):
-        ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        fname = f"transcript_{st.session_state.session_id}_{ts}.txt"
-        fpath = os.path.join(st.session_state.log_dir, fname)
-        try:
-            with open(fpath, "w", encoding="utf-8") as f:
-                f.write("===== Session Transcript =====\n")
-                f.write(f"timestamp       : {ts}\n")
-                f.write(f"session_id      : {st.session_state.session_id}\n")
-                f.write(f"identity_option : {identity_option}\n")
-                f.write(f"name_present    : {'present' if show_name else 'absent'}\n")
-                f.write(f"picture_present : {'present' if show_picture else 'absent'}\n")
-                scenostr = scenario if scenario != "Other" else f"Other: {other_goal.strip() if other_goal else ''}"
-                f.write(f"scenario        : {scenostr}\n")
-                f.write(f"user_turns      : {st.session_state.user_turns}\n")
-                f.write(f"bot_turns       : {st.session_state.bot_turns}\n")
-                f.write("--------------------------------\n")
+    # 선택 변경 감지 → 플로우 초기화 + Skyler 안내를 즉시 채팅에 추가
+    if (
+        scenario != "— Select a scenario —"
+        and st.session_state.last_user_selected_scenario != scenario
+    ):
+        st.session_state.scenario_selected_once = True
+        st.session_state.last_user_selected_scenario = scenario
+        st.session_state.flow = {
+            "scenario": scenario, "stage": "start",
+            "slots": {
+                "product": None, "color": None, "size": None,
+                "contact_pref": None, "tier_known": None, "selected_collection": None,
+                "return_item": None, "received_date": None, "return_reason": None
+            }
+        }
+        st.session_state.chat_history.append(
+            (_chatbot_speaker(), f"Sure, I will help you with **{scenario}**. Please ask me a question.")
+        )
+
+# -------------------------
+# (하단) 입력/진행/종료 또는 만족도 단계
+# -------------------------
+with control_area:
+    scenario_selected = (st.session_state.flow.get("scenario") is not None)
+
+    # 1) 대화 단계
+    if not st.session_state.awaiting_feedback and not st.session_state.ended:
+        # 시나리오가 선택되어야 입력 허용
+        if scenario_selected:
+            with st.form("chat_form", clear_on_submit=True):
+                user_input = st.text_input("Your message:")
+                submitted = st.form_submit_button("Send")
+
+            if submitted and user_input.strip():
+                # 즉시 메모리 반영 → 같은 사이클에서 바로 보이도록
+                st.session_state.user_turns += 1
+                st.session_state.chat_history.append(("User", user_input.strip()))
+                bot_reply = handle_message(user_input.strip())
+                st.session_state.chat_history.append((_chatbot_speaker(), bot_reply))
+                st.session_state.bot_turns += 1
+        else:
+            st.info("Please choose a topic above to start chatting.")
+
+        # 진행 안내(문구 유지)
+        if st.session_state.user_turns < MIN_USER_TURNS:
+            remaining = MIN_USER_TURNS - st.session_state.user_turns
+            st.info(
+                f"You’ve sent {st.session_state.user_turns}/{MIN_USER_TURNS} messages (minimum). "
+                f"{remaining} more to go."
+            )
+        st.progress(min(st.session_state.user_turns / MIN_USER_TURNS, 1.0))
+
+        # End Session (5턴 전 회색 비활성 유지)
+        st.markdown("---")
+        can_end = (st.session_state.user_turns >= MIN_USER_TURNS)
+        help_text = None if can_end else f"Please send at least {MIN_USER_TURNS - st.session_state.user_turns} more message(s) before ending."
+        if st.button("End Session", disabled=not can_end, help=help_text):
+            st.session_state.awaiting_feedback = True
+            st.rerun()
+
+    # 2) 만족도 수집 단계
+    else:
+        if st.session_state.awaiting_feedback and not st.session_state.ended:
+            st.subheader("Before you go…")
+            st.write("**Overall, how satisfied are you with this chatbot service today?**")
+            st.caption("1 = Very dissatisfied, 7 = Very satisfied")
+            rating = st.slider("Your overall satisfaction", min_value=1, max_value=7, value=5, step=1)
+
+            # 🔹 Prolific ID 입력 (선택 사항)
+            prolific_id = st.text_input(
+                "Please provide your Prolific ID (write N/A if none) — only to check the submission completion.",
+                value=""
+            )
+
+            if st.button("Submit Rating"):
+                ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                # 시나리오 문자열
+                scenostr = st.session_state.flow.get("scenario") or "— Select a scenario —"
+
+                # 전사 구성 (Prolific ID 포함)
+                transcript_lines = []
+                transcript_lines.append("===== Session Transcript =====")
+                transcript_lines.append(f"timestamp       : {ts}")
+                transcript_lines.append(f"session_id      : {st.session_state.session_id}")
+                transcript_lines.append(f"identity_option : {identity_option}")
+                transcript_lines.append(f"name_present    : {'present' if show_name else 'absent'}")
+                transcript_lines.append(f"picture_present : {'present' if show_picture else 'absent'}")
+                transcript_lines.append(f"scenario        : {scenostr}")
+                transcript_lines.append(f"user_turns      : {st.session_state.user_turns}")
+                transcript_lines.append(f"bot_turns       : {st.session_state.bot_turns}")
+                transcript_lines.append(f"prolific_id     : {prolific_id if prolific_id.strip() else 'N/A'}")
+                transcript_lines.append("--------------------------------")
                 for spk, msg in st.session_state.chat_history:
-                    f.write(f"{spk}: {msg}\n")
-                f.write("--------------------------------\n")
-                f.write(f"Satisfaction (1-7): {rating}\n")
-        except Exception as e:
-            st.error(f"Failed to save transcript: {e}")
+                    transcript_lines.append(f"{spk}: {msg}")
+                transcript_lines.append("--------------------------------")
+                transcript_lines.append(f"Satisfaction (1-7): {rating}")
+                transcript_text = "\n".join(transcript_lines)
+
+                # 저장
+                try:
+                    supabase.table("transcripts").insert({
+                        "session_id": st.session_state.session_id,
+                        "ts": datetime.datetime.utcnow().isoformat() + "Z",
+                        "transcript_text": transcript_text,
+                    }).execute()
+
+                    try:
+                        supabase.table("sessions").insert({
+                            "session_id": st.session_state.session_id,
+                            "ts_start": datetime.datetime.utcnow().isoformat() + "Z",
+                            "ts_end": datetime.datetime.utcnow().isoformat() + "Z",
+                            "identity_option": identity_option,
+                            "brand_type": brand_type,
+                            "name_present": "present",
+                            "picture_present": "present",
+                            "scenario": scenostr,
+                            "user_turns": st.session_state.user_turns,
+                            "bot_turns": st.session_state.bot_turns,
+                        }).execute()
+                    except Exception as insert_err:
+                        if "duplicate" in str(insert_err).lower() or "23505" in str(insert_err):
+                            supabase.table("sessions").update({
+                                "ts_end": datetime.datetime.utcnow().isoformat() + "Z",
+                                "identity_option": identity_option,
+                                "brand_type": brand_type,
+                                "name_present": "present",
+                                "picture_present": "present",
+                                "scenario": scenostr,
+                                "user_turns": st.session_state.user_turns,
+                                "bot_turns": st.session_state.bot_turns,
+                            }).eq("session_id", st.session_state.session_id).execute()
+                        else:
+                            raise insert_err
+
+                except Exception as e:
+                    st.error(f"Failed to save to Supabase: {e}")
+                else:
+                    st.session_state.rating_saved = True
+                    st.session_state.ended = True
+                    st.session_state.awaiting_feedback = False
+                    st.success("Thanks! Your feedback has been recorded. The session is now closed.")
+
+# -------------------------
+# (상단) 채팅 렌더링 — 인사 → 선택 반영 → 방금 입력/응답 순서로 즉시 표시
+# -------------------------
+with chat_area:
+    for speaker, message in st.session_state.chat_history:
+        if speaker == "User":
+            st.markdown(
+                f"""
+                <div style='text-align:right; margin:6px 0;'>
+                    <span style='background-color:#DCF8C6; padding:8px 12px; border-radius:12px; display:inline-block;'>
+                        <b>You:</b> {message}
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
         else:
-            st.session_state.saved_fpath = fpath
+            st.markdown(
+                f"""
+                <div style='text-align:left; margin:6px 0;'>
+                    <span style='background-color:#F1F0F0; padding:8px 12px; border-radius:12px; display:inline-block;'>
+                        <b>{speaker}:</b> {message}
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-        csv_path = os.path.join(st.session_state.log_dir, "satisfaction.csv")
-        header = ["timestamp", "session_id", "identity_option", "name_present", "picture_present",
-                  "scenario", "user_turns", "bot_turns", "satisfaction_1to7"]
-        row = [datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-               st.session_state.session_id, identity_option,
-               "present" if show_name else "absent",
-               "present" if show_picture else "absent",
-               scenostr, st.session_state.user_turns,
-               st.session_state.bot_turns, rating]
 
-        try:
-            write_header = not os.path.exists(csv_path)
-            with open(csv_path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if write_header:
-                    w.writerow(header)
-                w.writerow(row)
-        except Exception as e:
-            st.error(f"Failed to save rating CSV: {e}")
-        else:
-            st.session_state.rating_saved = True
-            st.session_state.ended = True
-            st.session_state.awaiting_feedback = False
-            st.success("Thanks! Your feedback has been recorded. The session is now closed.")
-
-if st.session_state.ended and st.session_state.rating_saved:
-    st.info("Your session has ended and your feedback was recorded. You may close this window.")
