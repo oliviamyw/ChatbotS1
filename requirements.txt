@@ -4,7 +4,7 @@ langchain
 langchain-community
 langchain-openai
 chromadb
-supabase-py
+supabase
 python-dotenv
 pathlib
 tiktoken
