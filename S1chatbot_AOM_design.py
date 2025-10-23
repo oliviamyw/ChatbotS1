@@ -902,15 +902,16 @@ INLINE_HANDLERS = {
 }
 
 
-
 # =========================
 # Orchestrator
 # =========================
 def handle_message(user_text: str) -> str:
+    # 1) Pending yes/no 처리
     pending_reply = handle_pending_yes(user_text)
     if pending_reply:
         return maybe_add_one_time_closing(pending_reply)
 
+    # 2) 글로벌 인텐트 감지 및(필요 시) 전환 제안/인라인 응답
     detected = detect_global_intent(user_text)
     if detected:
         current = st.session_state.flow.get("scenario")
@@ -926,11 +927,14 @@ def handle_message(user_text: str) -> str:
             set_pending("confirm_switch", {"target": target})
             return maybe_add_one_time_closing(msg)
 
-    rule_reply = route_by_scenario(st.session_state.flow.get("scenario") or scenario, user_text)
+    # 3) 현재 시나리오에 대한 규칙 기반 라우팅
+    current_scenario = st.session_state.flow.get("scenario")
+    rule_reply = route_by_scenario(current_scenario, user_text)
     if rule_reply is not None:
         infer_pending_from_bot_reply(rule_reply)
         return maybe_add_one_time_closing(rule_reply)
 
+    # 4) LLM/RAG 폴백
     bot_reply = llm_fallback(user_text)
     infer_pending_from_bot_reply(bot_reply)
     return maybe_add_one_time_closing(bot_reply)
@@ -1068,14 +1072,16 @@ with control_area:
 
                 # 저장
                 try:
+                    # 1) transcript 저장
                     supabase.table("transcripts").insert({
                         "session_id": st.session_state.session_id,
                         "ts": datetime.datetime.utcnow().isoformat() + "Z",
                         "transcript_text": transcript_text,
                     }).execute()
-
-                    try:
-                        supabase.table("sessions").insert({
+                
+                    # 2) session 정보 upsert (중복 insert 방지)
+                    supabase.table("sessions").upsert(
+                        {
                             "session_id": st.session_state.session_id,
                             "ts_start": datetime.datetime.utcnow().isoformat() + "Z",
                             "ts_end": datetime.datetime.utcnow().isoformat() + "Z",
@@ -1086,22 +1092,10 @@ with control_area:
                             "scenario": scenostr,
                             "user_turns": st.session_state.user_turns,
                             "bot_turns": st.session_state.bot_turns,
-                        }).execute()
-                    except Exception as insert_err:
-                        if "duplicate" in str(insert_err).lower() or "23505" in str(insert_err):
-                            supabase.table("sessions").update({
-                                "ts_end": datetime.datetime.utcnow().isoformat() + "Z",
-                                "identity_option": identity_option,
-                                "brand_type": brand_type,
-                                "name_present": "present",
-                                "picture_present": "present",
-                                "scenario": scenostr,
-                                "user_turns": st.session_state.user_turns,
-                                "bot_turns": st.session_state.bot_turns,
-                            }).eq("session_id", st.session_state.session_id).execute()
-                        else:
-                            raise insert_err
-
+                        },
+                        on_conflict="session_id"
+                    ).execute()
+                
                 except Exception as e:
                     st.error(f"Failed to save to Supabase: {e}")
                 else:
@@ -1137,5 +1131,6 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
