@@ -447,6 +447,7 @@ def llm_fallback(user_message: str) -> str:
 # Pending yes/no logic (global)
 # =========================
 def set_pending(intent: str, data: dict | None = None):
+    # 불필요한 중첩 제거: {"intent": ..., "data": {...}} 한 단계만 유지
     st.session_state.pending = {"intent": intent, "data": (data or {})}
 
 def consume_pending():
@@ -501,17 +502,17 @@ def handle_pending_yes(user_text: str) -> str | None:
             )
 
         if intent == "confirm_switch":
-            data = consume_pending()
-            target = data["data"].get("target")
+            pend_consumed = consume_pending()
+            target = pend_consumed["data"].get("target")  # ✅ 여기! data["data"] 아님
             if target:
                 st.session_state.flow = {
                     "scenario": target, "stage": "start",
                     "slots": { **st.session_state.flow["slots"] }
                 }
                 return f"Great—switching to **{target}**. How can I help within this topic?"
-            consume_pending()
             return "Okay—switching contexts."
 
+        # 기타 펜딩 의도에 대해 기본 응답
         consume_pending()
         return "Got it."
 
@@ -1131,6 +1132,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
