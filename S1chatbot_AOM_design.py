@@ -405,7 +405,7 @@ def answer_with_rag(user_message: str) -> str:
     query = make_query(user_message)
     context = retrieve_context(query, k=6)
 
-    style_instruction = tone_insturction()
+    style_instruction = tone_instruction()
     bot_identity = f"named {CHATBOT_NAME}" if show_name else "with no name"
     prompt = f"""
 You are a helpful customer service chatbot {bot_identity} for Style Loom.
@@ -1136,6 +1136,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
