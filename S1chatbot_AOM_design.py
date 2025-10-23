@@ -748,7 +748,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                     val = None
 
                 if val is not None and (too_small or too_big):
-                    rec = val + 1 if too_small else val - 1
+                    rec = max(0, val - 1 if too_big else val + 1)
                     flow["stage"] = "end_or_more"
                     return (
                         f"Since **{base}** feels {'small' if too_small else 'big'}, try **{rec:.1f}**. "
@@ -1132,6 +1132,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
