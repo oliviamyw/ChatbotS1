@@ -401,12 +401,32 @@ def make_query(user_message: str) -> str:
 # =========================
 
 def answer_with_rag(user_message: str) -> str:
+    # 슬롯 업데이트
     _update_slots_from_text(user_message)
+
+    # RAG 조회
     query = make_query(user_message)
     context = retrieve_context(query, k=6)
 
-    style_instruction = tone_instruction()
+    # --- Style instruction 안전 획득 ---
+    # tone_instruction() 헬퍼가 있으면 사용, 없거나 오타면 TONE_STYLE로 폴백
+    try:
+        style_instruction = tone_instruction()  # 헬퍼가 정상 정의되어 있으면 이 줄이 실행됨
+    except NameError:
+        # 헬퍼 없음/오타 ↔ 안전 폴백
+        try:
+            style_instruction = TONE_STYLE.get(TONE, TONE_STYLE["informal"])
+        except Exception:
+            # 최후 폴백(사전 자체가 없다면)
+            style_instruction = "Use a friendly, casual tone. Use emojis."
+
+    # 세션 상태 방어적 참조
+    flow = getattr(st.session_state, "flow", {}) or {}
+    known_slots = flow.get("slots", {})
+    current_scenario = flow.get("scenario")
+
     bot_identity = f"named {CHATBOT_NAME}" if show_name else "with no name"
+
     prompt = f"""
 You are a helpful customer service chatbot {bot_identity} for Style Loom.
 Ground every answer in the BUSINESS CONTEXT. If critical info is missing, ask **one concise follow-up question** only.
@@ -417,9 +437,9 @@ Do not invent policy, numbers, or SKUs. Keep answers short and helpful.
 === END CONTEXT ===
 
 Meta:
-- Current scenario: {st.session_state.flow.get('scenario')}
+- Current scenario: {current_scenario}
 - Product categories: {", ".join(PRODUCT_CATEGORIES)}
-- Known slots: {st.session_state.flow["slots"]}
+- Known slots: {known_slots}
 
 Style:
 {style_instruction}
@@ -441,7 +461,6 @@ Chatbot:
 
 def llm_fallback(user_message: str) -> str:
     return answer_with_rag(user_message)
-
 
 # =========================
 # Pending yes/no logic (global)
@@ -1136,6 +1155,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
