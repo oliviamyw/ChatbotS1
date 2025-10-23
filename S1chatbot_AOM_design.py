@@ -399,17 +399,13 @@ def make_query(user_message: str) -> str:
 # =========================
 # LLM (RAG) fallback
 # =========================
-TONE_STYLE = {
-    "informal": "Use a friendly, casual tone. Use emojis.",
-    "formal": "Use a formal, respectful tone. No emojis."
-}
 
 def answer_with_rag(user_message: str) -> str:
     _update_slots_from_text(user_message)
     query = make_query(user_message)
     context = retrieve_context(query, k=6)
 
-    style_instruction = TONE_STYLE["informal"]
+    style_instruction = tone_insturction()
     bot_identity = f"named {CHATBOT_NAME}" if show_name else "with no name"
     prompt = f"""
 You are a helpful customer service chatbot {bot_identity} for Style Loom.
@@ -1141,4 +1137,5 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
