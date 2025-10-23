@@ -991,10 +991,21 @@ with scenario_area:
         "About the brand",
         "Other",
     ]
-    scenario = st.selectbox("", SCENARIOS, index=0, key="scenario_select")
+
+    # ✅ 접근성 경고 해결: 빈 레이블("") 대신 의미 있는 레이블을 주고 화면에서는 숨김
+    scenario = st.selectbox(
+        "Select a scenario",
+        SCENARIOS,
+        index=0,
+        key="scenario_select",
+        label_visibility="collapsed",
+    )
+
     other_goal_input = ""
     if scenario == "Other":
-        other_goal_input = st.text_input("If 'Other', briefly describe your goal (optional)")
+        other_goal_input = st.text_input(
+            "If 'Other', briefly describe your goal (optional)"
+        )
 
     # 선택 변경 감지 → 플로우 초기화 + Skyler 안내를 즉시 채팅에 추가
     if (
@@ -1004,7 +1015,8 @@ with scenario_area:
         st.session_state.scenario_selected_once = True
         st.session_state.last_user_selected_scenario = scenario
         st.session_state.flow = {
-            "scenario": scenario, "stage": "start",
+            "scenario": scenario,
+            "stage": "start",
             "slots": {
                 "product": None, "color": None, "size": None,
                 "contact_pref": None, "tier_known": None, "selected_collection": None,
@@ -1155,6 +1167,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
