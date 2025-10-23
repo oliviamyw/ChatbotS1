@@ -564,12 +564,14 @@ try:
     _is_shipping_query
 except NameError:
     def _is_shipping_query(t: str) -> bool:
-        """Detect shipping or delivery-related questions."""
+        """Detect shipping/delivery questions (exclude 'new arrival(s)')."""
+        text = (t or "")
         return bool(re.search(
-            r"\b(ship(ping)?|delivery|arriv(e|al)|how long|take to (arrive|deliver)|when.*(arrive|deliver))\b",
-            (t or ""), re.I
+            # 배송 맥락만: ship/shipping/deliver/ETA/트래킹/도착시점 질문 등
+            r"\b(ship|shipping|deliver(y|ed|ing)?|eta|track(ing)?|when\s+will\s+it\s+(arrive|be\s+delivered)|how\s+long.*(deliver|shipping|arrive))\b",
+            text,
+            re.I
         ))
-
 
 # =========================
 # Rule-based scenario router
@@ -787,14 +789,16 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 # =========================
 
 GLOBAL_INTENTS = [
-    # pattern, intent_key, target_scenario, priority, can_inline
+    # ✅ New arrivals / collections 
+    (r"\b(new\s+arrivals?|latest\s+(drop|collection|release)s?|this\s+(winter|fall|autumn|spring|summer))\b",
+     "new_arrivals_intent", "New arrivals & collections", 10, True),
 
-    # ✅ 새로 추가: "size chart / size guide" → Size & fit guidance
+    # ✅ Size chart / guide
     (r"\b(size\s*(chart|guide)|sizing\s*(chart|guide)?|size\s*info|size\s*measurement(s)?)\b",
      "size_chart_intent", "Size & fit guidance", 9, True),
 
-    # ✅ 새로 추가: 배송 관련 의도 → Shipping & returns
-    (r"\b(ship(ping)?|delivery|deliver|arriv(e|al)|eta|when.*(arrive|get)|how\s+long)\b",
+    # ✅ Shipping 
+    (r"\b(ship|shipping|deliver(y|ed|ing)?|eta|track(ing)?|when\s+will\s+it\s+(arrive|be\s+delivered)|how\s+long.*(deliver|shipping|arrive))\b",
      "shipping_intent", "Shipping & returns", 9, True),
 
     (r"\b(return|refund|send back|exchange)\b",
@@ -803,7 +807,7 @@ GLOBAL_INTENTS = [
     (r"\b(exchange|swap size|different size|too (small|big))\b",
      "fit_intent", "Size & fit guidance", 8, True),
 
-    # 수정: size chart/guide 는 availability에서 제외
+    # size chart/guide는 availability에서 제외
     (r"\b(availability|in stock|stock|have .* size|colors?|sizes?(?!\s*(chart|guide)))\b",
      "availability_intent", "Check product availability", 7, True),
 
@@ -1132,6 +1136,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
