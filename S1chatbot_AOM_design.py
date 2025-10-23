@@ -561,6 +561,20 @@ def infer_pending_from_bot_reply(reply_text: str) -> None:
 
 
 # =========================
+# Shipping intent detector
+# =========================
+try:
+    _is_shipping_query
+except NameError:
+    def _is_shipping_query(t: str) -> bool:
+        """Detect shipping or delivery-related questions."""
+        return bool(re.search(
+            r"\b(ship(ping)?|delivery|arriv(e|al)|how long|take to (arrive|deliver)|when.*(arrive|deliver))\b",
+            (t or ""), re.I
+        ))
+
+
+# =========================
 # Rule-based scenario router
 # =========================
 def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
@@ -568,7 +582,6 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
     slots = flow["slots"]
     stage = flow.get("stage") or "start"
 
-    # 사용자 입력에서 가능한 슬롯 단서 추출(느슨한 추론 포함)
     _update_slots_from_text(user_text)
 
     # ---- Rewards & membership ----
@@ -578,26 +591,25 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             return ask_yesno(
                 intent="rewards_more",
                 message=(
-                    "Every 100 points = $1 off your next order. Points apply to merchandise subtotal only (not taxes or shipping). "
-                    "Tiers are based on a rolling 12-month spend, and points expire if not used or earned within 12 months. "
-                    "Want to know more about earning or redeeming points?"
+                    "Every 100 points = $1 off your next order (merchandise subtotal only). "
+                    "Tiers are based on a rolling 12-month spend, and points expire after 12 months of inactivity. "
+                    "Would you like to know more about earning or redeeming points?"
                 )
             )
 
-        # Keyword shortcuts (optional)
         if re.search(r"\b(earn|earning|accumulate|faster)\b", user_text, re.I):
             return (
-                "**Earning faster**\n"
-                "- Silver: 1.5× points (≥ $300/yr)\n"
-                "- Gold: 2× + Free Express (≥ $800/yr)\n"
-                "- VIP: 2× + Free Express + Gifts (≥ $1,500/yr)\n"
-                "Promotions may stack, but points are calculated on the **discounted** subtotal."
+                "**Earning faster:**\n"
+                "- Silver: 1.5× points (≥ $300/year)\n"
+                "- Gold: 2× points + Free Express (≥ $800/year)\n"
+                "- VIP: 2× points + Free Express + Gifts (≥ $1,500/year)\n"
+                "Promotions may stack, but points apply to the **discounted subtotal**."
             )
         if re.search(r"\b(redeem|redemption|use points|apply points)\b", user_text, re.I):
             return (
-                "**Redeeming**\n"
+                "**Redeeming points:**\n"
                 "- 100 pts = $1 off\n"
-                "- Apply at checkout on the payment step\n"
+                "- Apply at checkout (payment step)\n"
                 "- Points do not apply to taxes or shipping"
             )
         return None
@@ -610,7 +622,6 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 
         if stage == "collect":
             if not slots.get("product"):
-                # 사용자가 힌트를 준 경우 재시도 추론
                 _update_slots_from_text(user_text)
             if not slots.get("product"):
                 return "Sure—what product are you looking for (e.g., jacket, dress, t-shirt)?"
@@ -623,7 +634,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 intent="colors_sizes_more",
                 message=(
                     f"We have 5+ in stock for the {slots['product']} in {slots['color']} / {slots['size']}. "
-                    "However, a different color is running low in stock. Would you also like me to suggest a similar low-stock option?"
+                    "However, another color is running low in stock. Would you like me to suggest a low-stock option?"
                 ),
                 data={"slots_snapshot": slots.copy()}
             )
@@ -632,8 +643,8 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             if YES_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
                 return (
-                    f"A similar last-season {slots['product']} in the same {slots['color']} is down to the final 2 pieces. "
-                    "Would you like a restock alert for the current color/size, or to see similar items?"
+                    f"A similar last-season {slots['product']} in {slots['color']} is down to the final 2 pieces. "
+                    "Would you like a restock alert or see similar styles?"
                 )
             if NO_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
@@ -641,32 +652,32 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             return "Would you like me to suggest a similar low-stock option?"
 
         if stage == "end_or_more":
-            return "Happy to help. If you need anything else, just say the word!"
+            return "Happy to help. Anything else you’d like to check?"
         return None
 
     # ---- Shipping & returns ----
     if current_scenario == "Shipping & returns":
-        # ✅ 어디서든 배송 질문이면 먼저 응답 (추가 질문 없이 개요만)
+        # Shipping question detection — prioritized over return flow
         if _is_shipping_query(user_text):
             flow["stage"] = "end_or_more"
             return (
-                "**Shipping overview**\n"
+                "**Shipping overview:**\n"
                 "- Processing: usually 1 business day\n"
                 "- Standard (domestic): about 3–5 business days\n"
                 "- Express (domestic): about 1–2 business days\n"
                 "- International: typically 7–14 business days"
             )
-        # ▼ 이하 기존 반품 플로우 유지 ...
 
+        # Return flow
+        if stage in (None, "start"):
+            flow["stage"] = "returns_collect_item"
+            return "Of course! I can help with a return. What item would you like to return?"
 
         if stage == "returns_collect_item":
             if user_text.strip():
                 flow["slots"]["return_item"] = user_text.strip()
             flow["stage"] = "returns_collect_date"
-            return (
-                "Got it. When did you receive the item? "
-                "(Please provide a date like 2025-09-10)"
-            )
+            return "Got it. When did you receive the item? (Please provide a date like 2025-09-10)"
 
         if stage == "returns_collect_date":
             m = re.search(r"\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2})\b", user_text)
@@ -680,15 +691,12 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
         if stage == "returns_condition_check":
             if YES_PAT.search(user_text):
                 flow["stage"] = "returns_reason"
-                return (
-                    "Understood. Could you tell me the reason for the return? "
-                    "(e.g., too small, defective, changed mind)"
-                )
+                return "Understood. Could you tell me the reason for the return? (e.g., too small, defective, changed mind)"
             if NO_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
                 return (
                     "Unfortunately, we can only accept returns that are unworn and in original condition. "
-                    "If you have questions, I can share our exchange/repair options."
+                    "If you’d like, I can share our exchange or repair options."
                 )
             return "Please reply yes or no: is the item unworn and in original condition?"
 
@@ -697,36 +705,29 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             flow["stage"] = "returns_instructions"
             item = flow["slots"].get("return_item", "the item")
             return (
-                f"Thanks. To initiate your return for **{item}**, please follow these steps:\n"
-                "1) I’ll create a prepaid return label for you via email.\n"
+                f"Thanks. To start your return for **{item}**, please follow these steps:\n"
+                "1) I’ll send a prepaid return label via email.\n"
                 "2) Pack the item securely with all tags/accessories.\n"
                 "3) Drop it off within **14 days** of delivery.\n"
-                "Once we receive and inspect it, we’ll process your refund to the original payment method.\n"
-                "Would you like me to send the return label to your email on file? (yes/no)"
+                "Once received and inspected, your refund will be processed to the original payment method.\n"
+                "Would you like me to email the return label to you now? (yes/no)"
             )
 
         if stage == "returns_instructions":
             if YES_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
-                return (
-                    "Great—return label request submitted. You’ll receive it shortly. "
-                    "Is there anything else I can help you with?"
-                )
+                return "Great—return label request submitted! You’ll receive it shortly. Anything else I can help with?"
             if NO_PAT.search(user_text):
                 flow["stage"] = "end_or_more"
-                return (
-                    "No problem. If you need the label later, just ask. "
-                    "Anything else I can help you with?"
-                )
-            return "Would you like me to email you the return label now? (yes/no)"
+                return "No problem. If you need the label later, just ask. Anything else I can help with?"
+            return "Would you like me to email the return label now? (yes/no)"
 
         if stage == "end_or_more":
-            return "Happy to help. If you need anything else, just say the word!"
+            return "Happy to help. Anything else I can assist you with?"
         return None
 
-    # ---- Size & fit guidance ----  (numeric-first sizing; recommend only with fit signal)
+    # ---- Size & fit guidance ----
     if current_scenario == "Size & fit guidance":
-        # 0) size chart/guide 질의는 언제나 우선적으로 차트 안내만 제공
         if _is_size_chart_query(user_text):
             if stage in (None, "start"):
                 flow["stage"] = "fit_collect"
@@ -737,15 +738,11 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             return "Sure—tell me your current size and how it fits."
 
         if stage == "fit_collect":
-            # 크다/작다 신호
             too_small = re.search(r"\b(too\s*small|tight|snug)\b", user_text, re.I)
-            too_big   = re.search(r"\b(too\s*big|loose)\b", user_text, re.I)
-
-            # 숫자/문자 사이즈 파악
+            too_big = re.search(r"\b(too\s*big|loose)\b", user_text, re.I)
             num = re.search(r"\b(\d{2}(\.\d)?|\d{1,2}(\.\d)?)\b", user_text)
             letter = re.search(r"\b(XXS|XS|S|M|L|XL|XXL)\b", user_text, re.I)
 
-            # 1) 숫자 사이즈: fit 신호 있을 때만 증감 추천
             if num:
                 base = num.group(1)
                 try:
@@ -754,10 +751,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                     val = None
 
                 if val is not None and (too_small or too_big):
-                    if too_small:
-                        rec = val + 1 if val >= 20 else val + 0.5
-                    else:
-                        rec = val - 1 if val >= 20 else val - 0.5
+                    rec = val + 1 if too_small else val - 1
                     flow["stage"] = "end_or_more"
                     return (
                         f"Since **{base}** feels {'small' if too_small else 'big'}, try **{rec:.1f}**. "
@@ -766,7 +760,6 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 if val is not None and not (too_small or too_big):
                     return "Thanks. How does that size fit—**too small, too big, or just right**?"
 
-            # 2) 문자 사이즈: fit 신호 있을 때만 다음 사이즈 제안
             if letter:
                 L = letter.group(1).upper()
                 if too_small or too_big:
@@ -779,27 +772,17 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                             f"Since **{L}** feels {'small' if too_small else 'big'}, try **{rec}**. "
                             "Want me to check availability in that size?"
                         )
-                    return (
-                        "Based on your feedback, you may need to adjust one size. "
-                        "Want me to check availability?"
-                    )
-
-                # 문자 사이즈만 있고 맞음/작음/큼 정보가 없으면 follow-up
+                    return "You may need to adjust one size. Want me to check availability?"
                 return f"Got it. How does **{L}** fit—**too small, too big, or just right**?"
 
-            # 3) 아직 충분한 정보가 없으면 가이드 질문 유지
-            return (
-                "To recommend a size, tell me what you usually wear **and** whether it feels "
-                "**too small, too big, or just right**."
-            )
+            return "To recommend a size, tell me what you usually wear and whether it feels **too small, too big, or just right**."
 
         if stage == "end_or_more":
-            return "Happy to help. If you need anything else, just say the word!"
+            return "Happy to help. Anything else I can assist you with?"
         return None
 
-    # 다른 시나리오에서는 규칙 없음 → LLM/RAG로
+    # No matching rule — fallback to LLM/RAG
     return None
-
 
 
 # =========================
@@ -1158,3 +1141,4 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
