@@ -831,6 +831,15 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             return "Happy to help. Anything else I can assist you with?"
         return None
 
+    # ---- Discounts & promotions ----
+    if current_scenario == "Discounts & promotions":
+        flow["stage"] = "end_or_more"
+        return (
+            "Current promotions: sitewide **10%** (code **WELCOME10**), plus new-member **+5%** on the first order. "
+            "Order of operations: subtotal → % coupons → points → tax & shipping. "
+            "Some items may be excluded (FINAL_SALE, GIFT_CARD, MTO_EXCLUDED)."
+        )
+
     # ---- Size & fit guidance ----
     if current_scenario == "Size & fit guidance":
         if _is_size_chart_query(user_text):
@@ -1339,6 +1348,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
