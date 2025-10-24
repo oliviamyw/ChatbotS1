@@ -931,9 +931,9 @@ GLOBAL_INTENTS = [
     (r"\b(ship|shipping|deliver(y|ed|ing)?|eta|track(ing)?|when\s+will\s+it\s+(arrive|be\s+delivered)|how\s+long.*(deliver|shipping|arrive))\b",
      "shipping_intent", "Shipping & returns", 9, True),
 
-    # Returns/exchange generic
-    (r"\b(return|refund|send back|exchange)\b",
-     "returns_intent", "Shipping & returns", 8, False),
+    # Returns/exchange generic 
+    (r"\b(return\s+policy|refund\s+policy|return\s+window|return|refund|send back|exchange)\b",
+     "returns_intent", "Shipping & returns", 8, True),
 
     # Availability
     (r"\b(availability|in stock|stock|have .* size|colors?|sizes?(?!\s*(chart|guide)))\b",
@@ -1358,6 +1358,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
