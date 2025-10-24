@@ -635,10 +635,14 @@ try:
     _is_shipping_query
 except NameError:
     def _is_shipping_query(t: str) -> bool:
-        """Detect shipping/delivery questions (exclude 'new arrival(s)')."""
+        """Detect shipping/delivery questions (exclude 'free return(s)' and 'return shipping')."""
         text = (t or "")
+        # exclude explicit free-returns phrasing so it doesn't fall into generic shipping
+        if re.search(r"\bfree\s+return(s)?(\s+shipping)?\b", text, re.I):
+            return False
+        if re.search(r"\breturn\s+shipping\b", text, re.I):
+            return False
         return bool(re.search(
-            # 배송 맥락만: ship/shipping/deliver/ETA/트래킹/도착시점 질문 등
             r"\b(ship|shipping|deliver(y|ed|ing)?|eta|track(ing)?|when\s+will\s+it\s+(arrive|be\s+delivered)|how\s+long.*(deliver|shipping|arrive))\b",
             text,
             re.I
@@ -1304,6 +1308,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
