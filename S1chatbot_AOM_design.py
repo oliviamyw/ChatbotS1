@@ -164,9 +164,12 @@ if not st.session_state.session_meta_logged:
 # =========================
 TONE = "informal"
 TONE_STYLE = {
-    "informal": "Use a friendly, casual tone. Use emojis.",
+    # informal: 친근하지만 군더더기 없는 톤, 이모지는 '최대 1개', 문장 맨 끝에만 사용
+    "informal": "Use a friendly, concise tone. Use at most one emoji per reply and place it only at the very end when it truly adds warmth. Do not start with 'Hey there'.",
+    # formal: 이모지 금지
     "formal": "Use a formal, respectful tone. No emojis."
 }
+
 PRODUCT_CATEGORIES = [
     "blouse", "skirt", "pants", "cardigans / sweaters", "dresses",
     "jumpsuits", "jackets", "t-shirts", "sweatshirt / sweatpants",
@@ -1167,6 +1170,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
