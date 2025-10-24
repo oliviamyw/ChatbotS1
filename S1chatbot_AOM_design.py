@@ -671,6 +671,26 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 )
             )
 
+        # ✅ NEW: "free shipping?"
+        if re.search(r"\bfree\s+(express\s+)?shipping\b", user_text, re.I):
+            return (
+                "Gold includes **Free Express Shipping** (≥ $800/year). "
+                "VIP also includes Free Express plus gifts (≥ $1,500/year)."
+            )
+
+        # ✅ NEW: "how do I get to VIP faster?" 
+        if (
+            re.search(r"\b(get|reach|make|hit|unlock)\b.*\bvip\b.*\b(fast|faster|quick|quickly|sooner)\b", user_text, re.I)
+            or re.search(r"\bvip\b.*\b(fast|faster|quick|quickly|sooner)\b", user_text, re.I)
+        ):
+            return (
+                "**Getting to VIP faster:**\n"
+                "- Consolidate purchases on one account (points apply to the discounted subtotal).\n"
+                "- Shop during promos; points still apply to the **discounted** subtotal.\n"
+                "- Gold starts at **$800/yr** (2× points); VIP at **$1,500/yr** (2× + Free Express + gifts)."
+            )
+
+        # prior logic
         if re.search(r"\b(earn|earning|accumulate|faster)\b", user_text, re.I):
             return (
                 "**Earning faster:**\n"
@@ -679,6 +699,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 "- VIP: 2× points + Free Express + Gifts (≥ $1,500/year)\n"
                 "Promotions may stack, but points apply to the **discounted subtotal**."
             )
+
         if re.search(r"\b(redeem|redemption|use points|apply points)\b", user_text, re.I):
             return (
                 "**Redeeming points:**\n"
@@ -686,6 +707,7 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
                 "- Apply at checkout (payment step)\n"
                 "- Points do not apply to taxes or shipping"
             )
+
         return None
 
     # ---- Check product availability ----
@@ -1308,6 +1330,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
