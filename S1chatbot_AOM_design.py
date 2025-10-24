@@ -760,15 +760,132 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 
     # ---- New arrivals & collections ----
     if current_scenario == "New arrivals & collections":
-        flow["stage"] = "end_or_more"
-        return (
-            "Soft Blouse is a cotton-modal with a softly draped silhouette in Ivory, Mist Blue, Rose Beige, and Black. "
-            "City Knit is a cozy wool-blend in Oatmeal, Charcoal, Forest, and Pink. "
-            "Everyday Jacket has clean tailoring in twill/nylon—Sand, Navy, Olive. "
-            "Tailored Pants are cut in stretch twill—Black, Greige, Navy. "
-            "Weekend Dress is fluid modal jersey—Berry, Ink, Cream. "
-            "Want details on a specific item or color?"
-        )
+        text = _preprocess_user_text(user_text)
+        low = text.lower()
+
+        # slots from free text (so we can branch to availability if user already gave color/size)
+        prod  = extract_product(text)
+        color = extract_color(text)
+        size  = extract_size(text)
+
+        # 1) 첫 진입: 한 번만 핀포인트 질문
+        if stage in (None, "start"):
+            flow["stage"] = "new_intro"
+            return "Looking for a category or a color from the new collection?"
+
+        # 2) 새 드롭 아이템 요약(문장형) — 카테고리 키 → 요약문
+        summaries = {
+            # 표준 카테고리 키
+            "blouse":  "Soft Blouse — softly draped cotton-modal. Colors: Ivory, Mist Blue, Rose Beige, Black.",
+            "sweater": "City Knit — cozy wool-blend textures. Colors: Oatmeal, Charcoal, Forest, Pink.",
+            "jacket":  "Everyday Jacket — clean tailoring in twill/nylon. Colors: Sand, Navy, Olive.",
+            "pants":   "Tailored Pants — stretch twill, streamlined lines. Colors: Black, Greige, Navy.",
+            "dress":   "Weekend Dress — fluid modal jersey. Colors: Berry, Ink, Cream.",
+        }
+        # 이름/동의어 → 표준 키
+        to_key = {
+            "city knit": "sweater",
+            "cardigan": "sweater",
+            "knit": "sweater",
+            "blouses": "blouse",
+            "dresses": "dress",
+            "trousers": "pants",
+            "t-shirt": "tshirt", "t-shirt": "tshirt", "tee": "tshirt", "tees":"tshirt",
+        }
+        # extract_product가 이름(예: City Knit)이나 복수형을 줄 수 있어 보정
+        if prod:
+            p = prod.lower()
+            prod_key = to_key.get(p, p)
+        else:
+            prod_key = None
+
+        # 3) 색상 → 어떤 신상품에 있는지 역매핑
+        color_to_items = {
+            "ivory": ["Soft Blouse"],
+            "mist blue": ["Soft Blouse"],
+            "rose beige": ["Soft Blouse"],
+            "black": ["Soft Blouse", "Tailored Pants"],
+            "oatmeal": ["City Knit"],
+            "charcoal": ["City Knit"],
+            "forest": ["City Knit"],
+            "pink": ["City Knit"],
+            "sand": ["Everyday Jacket"],
+            "navy": ["Everyday Jacket", "Tailored Pants"],
+            "olive": ["Everyday Jacket"],
+            "greige": ["Tailored Pants"],
+            "berry": ["Weekend Dress"],
+            "ink": ["Weekend Dress"],
+            "cream": ["Weekend Dress"],
+        }
+
+        # 4) 사용자가 카테고리를 말한 경우 → 해당 아이템만 요약 (반복 방지)
+        if prod_key in summaries:
+            flow["stage"] = "end_or_more"
+            base = summaries[prod_key]
+            # 색/사이즈까지 이미 있으면 가용성 체크로 전환 제안
+            if color or size:
+                pick = f"{prod_key}"
+                if color: pick += f" in {color}"
+                if size:  pick += f" / {size}"
+                reply = f"{base} Want me to check availability for **{pick}**? I can switch to **Check product availability**."
+                return maybe_dedupe_reply(reply)
+            # 색/사이즈 없으면 자연스러운 좁히기
+            reply = f"{base} Would you like me to narrow by **color** or **size** next?"
+            return maybe_dedupe_reply(reply)
+
+        # 5) 색상만 말한 경우 → 그 색상이 포함된 신상품 나열
+        if color and color in color_to_items:
+            flow["stage"] = "end_or_more"
+            items = ", ".join(color_to_items[color])
+            reply = (
+                f"In this drop, **{color}** appears in: {items}. "
+                "Which one should I focus on, and do you have a size in mind?"
+            )
+            return maybe_dedupe_reply(reply)
+
+        # 6) 스타일/용도 신호(너무 특정하지 않게 폭넓게) → 컬렉션 내 2~3개로 제안
+        if _any([r"\bcasual\b", r"\boffice\b", r"\bwork\b", r"\btravel\b", r"\bweekend\b",
+                 r"\bparty\b", r"\bevent\b", r"\bholiday\b"], low):
+            flow["stage"] = "end_or_more"
+            # 너무 구체적 한 가지가 아니라, 컬렉션 품목으로 폭넓게 안내
+            reply = (
+                "From the new collection, versatile picks are **City Knit** for layering, "
+                "**Everyday Jacket** on top, and **Tailored Pants** for balance. "
+                "Prefer me to tailor by category or color?"
+            )
+            return maybe_dedupe_reply(reply)
+
+        # 7) 티셔츠/신발 등 컬렉션 외 카테고리 언급 → 사실 전달 + 코어 카탈로그로 유도
+        if prod_key in ("tshirt", "shoes", "shoe", "sneakers"):
+            flow["stage"] = "end_or_more"
+            reply = (
+                "This seasonal drop highlights Soft Blouse, City Knit, Everyday Jacket, Tailored Pants, and Weekend Dress. "
+                "If you’d like **core** tees/shoes instead, I can switch to **Check product availability** and search the main catalog."
+            )
+            return maybe_dedupe_reply(reply)
+
+        # 8) 그 밖의 'new arrivals/collection' 같은 일반 질문 → 전체 요약 1회 + 좁히기
+        if _any([r"\bnew\b", r"\barrivals?\b", r"\bcollection\b", r"\bfall\b", r"\bautumn\b", r"\bwinter\b"], low):
+            flow["stage"] = "end_or_more"
+            reply = (
+                "Soft Blouse (Ivory/Mist Blue/Rose Beige/Black). City Knit (Oatmeal/Charcoal/Forest/Pink). "
+                "Everyday Jacket (Sand/Navy/Olive). Tailored Pants (Black/Greige/Navy). Weekend Dress (Berry/Ink/Cream). "
+                "Tell me a **category** or **color**, or give me **color/size** and I can switch to availability lookup."
+            )
+            return maybe_dedupe_reply(reply)
+
+        # 9) 색/사이즈만 주는 등 → 가용성 체크로 바로 유도
+        if (color or size):
+            flow["stage"] = "end_or_more"
+            ask = "color" if (color and not size) else "size" if (size and not color) else "category"
+            reply = (
+                f"I can check real-time stock. Tell me the **category** and {ask} to switch to **Check product availability**."
+            )
+            return maybe_dedupe_reply(reply)
+
+        # 10) 폴백: 사용자에게 간단히 선택 유도
+        return "From the new collection, which category should we start with—blouse, knit/sweater, jacket, pants, or dress?"
+
 
     # ---- Shipping & returns ----
     if current_scenario == "Shipping & returns":
@@ -1377,6 +1494,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
