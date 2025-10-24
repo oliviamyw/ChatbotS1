@@ -981,6 +981,27 @@ def inline_answer_size_chart(user_text: str) -> str:
         "| XXL | 44.5–46 | 37.5–39 | 47.5–49 |\n\n"
     )
 
+def inline_answer_new_arrivals(user_text: str) -> str:
+    # short, prose-friendly handoff to the collection
+    return ("Our new collection is live. Tell me a category or color and I’ll tailor picks. "
+            "Reply **yes** to switch to **New arrivals & collections**.")
+
+def inline_answer_promotions(user_text: str) -> str:
+    # mirrors your promotions_rules Short Answer Template
+    return ("You can apply % coupons to the merchandise subtotal (e.g., WELCOME10). "
+            "New members get an extra +5% on their first order and it stacks. "
+            "Some items may be excluded (FINAL_SALE, GIFT_CARD, MTO_EXCLUDED).")
+
+def inline_answer_price(user_text: str) -> str:
+    _update_slots_from_text(user_text)
+    return ("Prices vary by fabric and construction. If you tell me a product/color/size, "
+            "I’ll pull the current price. Typical ranges: tees $18–$32, shirts $35–$79, "
+            "knitwear $55–$129, pants $59–$119, jackets $89–$189, dresses $69–$149.")
+
+def inline_answer_mens_catalog(user_text: str) -> str:
+    # stops “we only sell women’s” errors and guides to category
+    return ("We offer apparel for men and women. For men, common categories include shirts, pants, "
+            "jackets, knitwear, and sleepwear. Which category would you like?")
 
 # =========================
 # Emoji / tone post-processor
@@ -1271,6 +1292,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
