@@ -1138,7 +1138,18 @@ def handle_message(user_text: str) -> str:
     detected = detect_global_intent(user_text)
     if detected:
         current = st.session_state.flow.get("scenario")
-        target = detected["target"]
+        target  = detected["target"]
+
+        # ⭐ 동일 시나리오여도 인라인 응답이 가능하면 '바로' 답변 (switch 확인 없이)
+        if detected["can_inline"]:
+            inline_fun = INLINE_HANDLERS.get(detected["key"])
+            if inline_fun:
+                # 같은 시나리오면 바로 인라인 답변
+                if current == target:
+                    reply = inline_fun(user_text)
+                    return maybe_add_one_time_closing(apply_tone_policies(reply))
+
+        # 시나리오가 다르면, 인라인 미사용 시 스위치 제안
         if current != target:
             if detected["can_inline"]:
                 inline_fun = INLINE_HANDLERS.get(detected["key"])
@@ -1366,6 +1377,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
