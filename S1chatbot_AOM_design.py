@@ -656,6 +656,23 @@ except NameError:
         ))
 
 # =========================
+# Helpers for pattern matching & avoiding repetition
+# =========================
+
+def _any(patterns, text):
+    """Return True if any regex in list matches the text."""
+    return any(re.search(p, text or "", re.I) for p in patterns)
+
+def maybe_dedupe_reply(reply: str) -> str:
+    """Avoid repeating the exact same bot message consecutively."""
+    hist = st.session_state.chat_history or []
+    last_bot = next((m for (spk, m) in reversed(hist) if spk == _chatbot_speaker()), None)
+    if last_bot and last_bot.strip() == reply.strip():
+        # add a light variation to make it sound natural
+        return reply + "\n\nWould you like to narrow by a category or color?"
+    return reply
+
+# =========================
 # Rule-based scenario router
 # =========================
 def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
@@ -1494,6 +1511,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
