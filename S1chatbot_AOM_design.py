@@ -250,7 +250,7 @@ def extract_size(t: str):
 
 def extract_product(t: str):
     text = _preprocess_user_text(t)
-    low  = text.lower()
+    low = text.lower()
 
     # 1) 명명된 라인업(정확 표기 우선)
     named = [
@@ -274,34 +274,32 @@ def extract_product(t: str):
     if "tee" in low or "t-shirt" in low or "tshirt" in low:
         return "t-shirt"
 
-    # ✅ 여기 추가: shoes / sneakers
+    # ✅ shoes / sneakers 인식
     if re.search(r"\b(running\s+shoes?|sneakers?|shoes?)\b", low, re.I):
         return "shoes"
 
-    # 3) 일반 카테고리(기존 리스트 유지/보강)
-cats = [
-    "blouse", "skirt", "pants", "cardigan", "cardigans", "sweater", "sweaters",
-    "dress", "dresses", "jumpsuit", "jumpsuits", "jacket", "jackets",
-    "t-shirt", "t-shirts", "sweatshirt", "sweatpants", "outer", "coat",
-    "trench", "trenches", "top", "tops", "bodysuit", "bodysuits",
-    "activewear", "shirt", "shirts", "shorts", "lingerie",
-    "shoe", "shoes", "sneaker", "sneakers"
-]
-
+    # 3) 일반 카테고리(복수형은 단수로 정규화)
+    cats = [
+        "blouse", "skirt", "pants", "cardigan", "cardigans", "sweater", "sweaters",
+        "dress", "dresses", "jumpsuit", "jumpsuits", "jacket", "jackets",
+        "t-shirt", "t-shirts", "sweatshirt", "sweatpants", "outer", "coat",
+        "trench", "trenches", "top", "tops", "bodysuit", "bodysuits",
+        "activewear", "shirt", "shirts", "shorts", "lingerie", "shoes"
+    ]
     for c in cats:
         if re.search(rf"\b{re.escape(c)}\b", low, re.I):
             if c in ["cardigans", "sweaters", "jackets", "dresses", "tops", "shirts", "jumpsuits"]:
                 return c.rstrip("s")
             return c
 
-    # 4) 두 단어 조합(느슨)
+    # 4) 두 단어 조합(느슨): "chunky knit sweater", "leather jacket" 등
     w = re.search(r"\b([\w\-]+(?:\s+[\w\-]+)?)\s+(jacket|skirt|blouse|t-?shirt|dress|pants|sweater|shoes)\b", text, re.I)
     if w:
         noun = w.group(2).lower()
-        if noun == "sweater":
-            return "sweater"
         if noun == "t-shirt":
             return "t-shirt"
+        if noun == "sweater":
+            return "sweater"
         return noun
 
     return None
@@ -1360,6 +1358,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
