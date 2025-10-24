@@ -1002,6 +1002,14 @@ def inline_answer_mens_catalog(user_text: str) -> str:
     return ("We offer apparel for men and women. For men, common categories include shirts, pants, "
             "jackets, knitwear, and sleepwear. Which category would you like?")
 
+def inline_answer_free_returns(user_text: str) -> str:
+    return (
+        "Return shipping is covered for defective or wrong-item cases. "
+        "For other reasons, coverage may vary by policy or promotion. "
+        "Would you like to switch to **Shipping & returns** for the steps?"
+    )
+
+
 # =========================
 # Emoji / tone post-processor
 # =========================
@@ -1051,6 +1059,7 @@ INLINE_HANDLERS = {
     "promotions_intent":   inline_answer_promotions,
     "price_intent":        inline_answer_price,
     "mens_catalog_intent": inline_answer_mens_catalog,
+    "free_returns_intent": inline_answer_free_returns,
 }
 
 
@@ -1295,6 +1304,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
