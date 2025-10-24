@@ -1044,10 +1044,14 @@ def apply_tone_policies(text: str) -> str:
 
 INLINE_HANDLERS = {
     "availability_intent": inline_answer_availability,
-    "fit_intent": inline_answer_fit,
-    "rewards_intent": inline_answer_rewards,
-    "size_chart_intent": inline_answer_size_chart,
-    "shipping_intent": inline_answer_shipping,  # ✅ 새로 추가
+    "fit_intent":          inline_answer_fit,
+    "rewards_intent":      inline_answer_rewards,
+    "size_chart_intent":   inline_answer_size_chart,
+    "shipping_intent":     inline_answer_shipping,
+    "new_arrivals_intent": inline_answer_new_arrivals,
+    "promotions_intent":   inline_answer_promotions,
+    "price_intent":        inline_answer_price,
+    "mens_catalog_intent": inline_answer_mens_catalog,
 }
 
 
@@ -1292,6 +1296,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
