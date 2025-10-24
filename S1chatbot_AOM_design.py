@@ -860,30 +860,47 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 # =========================
 
 GLOBAL_INTENTS = [
-    # ✅ New arrivals / collections 
-    (r"\b(new\s+arrivals?|latest\s+(drop|collection|release)s?|this\s+(winter|fall|autumn|spring|summer))\b",
+GLOBAL_INTENTS = [
+    # New arrivals / collections (cover fall/autumn phrasing too)
+    (r"\b(new\s+arrivals?|latest\s+(drop|collection|release)s?|new\s+collection|this\s+(winter|fall|autumn|spring|summer)|"
+     r"(winter|fall|autumn)\s+(arrivals?|collection))\b",
      "new_arrivals_intent", "New arrivals & collections", 10, True),
 
-    # ✅ Size chart / guide
+    # Size chart / guide
     (r"\b(size\s*(chart|guide)|sizing\s*(chart|guide)?|size\s*info|size\s*measurement(s)?)\b",
      "size_chart_intent", "Size & fit guidance", 9, True),
 
-    # ✅ Shipping 
+    # Free returns (generic, doesn’t hijack shipping)
+    (r"\b(free\s+return(s)?(\s+shipping)?|return\s+shipping\s+covered)\b",
+     "free_returns_intent", "Shipping & returns", 10, True),
+
+    # Shipping (keep generic; free-returns has equal/higher prio so it wins)
     (r"\b(ship|shipping|deliver(y|ed|ing)?|eta|track(ing)?|when\s+will\s+it\s+(arrive|be\s+delivered)|how\s+long.*(deliver|shipping|arrive))\b",
      "shipping_intent", "Shipping & returns", 9, True),
 
+    # Returns/exchange generic
     (r"\b(return|refund|send back|exchange)\b",
-     "returns_intent", "Shipping & returns", 10, False),
+     "returns_intent", "Shipping & returns", 8, False),
 
-    (r"\b(exchange|swap size|different size|too (small|big))\b",
-     "fit_intent", "Size & fit guidance", 8, True),
-
-    # size chart/guide는 availability에서 제외
+    # Availability
     (r"\b(availability|in stock|stock|have .* size|colors?|sizes?(?!\s*(chart|guide)))\b",
      "availability_intent", "Check product availability", 7, True),
 
+    # Rewards
     (r"\b(reward|point|redeem|earn|membership|tier)\b",
      "rewards_intent", "Rewards & membership", 6, True),
+
+    # Promotions / deals / discounts (new)
+    (r"\b(deals?|discounts?|promotions?|sale|promo code|coupon)\b",
+     "promotions_intent", "Discounts & promotions", 8, True),
+
+    # Price / range (new)
+    (r"\b(price|price\s*range|how much|cost)\b",
+     "price_intent", "Check product availability", 7, True),
+
+    # Men’s catalog (new)
+    (r"\b(mens|men’s|for\s+a\s+man|male)\b",
+     "mens_catalog_intent", "Other", 7, True),
 ]
 
 
@@ -1254,6 +1271,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
