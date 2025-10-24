@@ -338,25 +338,41 @@ def build_or_load_vectorstore(rag_dir: str):
     persist_dir = str(rag_path / ".chroma")
     embeddings = OpenAIEmbeddings(api_key=API_KEY, model="text-embedding-3-small")
 
+    # Try loading existing index first
     if Path(persist_dir).exists() and any(Path(persist_dir).iterdir()):
         try:
             return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
         except Exception as e:
             st.warning(f"Vectorstore load warning: {e}")
 
+    # === changed: load only human-authored text/markdown docs ===
     try:
+        # Load .txt first
         loader = DirectoryLoader(
             rag_dir,
-            glob="**/*.*",
+            glob="**/*.txt",
             loader_cls=TextLoader,
             loader_kwargs={"autodetect_encoding": True},
             show_progress=True,
             use_multithreading=True,
         )
-        docs = loader.load()
+        # Optionally add .md files as well
+        try:
+            md_loader = DirectoryLoader(
+                rag_dir,
+                glob="**/*.md",
+                loader_cls=TextLoader,
+                loader_kwargs={"autodetect_encoding": True},
+                show_progress=True,
+                use_multithreading=True,
+            )
+            docs = loader.load() + md_loader.load()
+        except Exception:
+            docs = loader.load()
     except Exception as e:
         st.warning(f"RAG documents could not be loaded: {e}")
         return None
+    # === end changed ===
 
     if not docs:
         return None
@@ -368,7 +384,11 @@ def build_or_load_vectorstore(rag_dir: str):
     )
     chunks = splitter.split_documents(docs)
     try:
-        return Chroma.from_documents(chunks, embedding_function=embeddings, persist_directory=persist_dir)
+        return Chroma.from_documents(
+            chunks,
+            embedding_function=embeddings,
+            persist_directory=persist_dir
+        )
     except Exception as e:
         st.warning(f"Vectorstore build failed: {e}")
         return None
@@ -389,14 +409,43 @@ def retrieve_context(query: str, k: int = 6) -> str:
         blocks.append(f"[Doc{i} from {os.path.basename(src)}]\n{d.page_content.strip()}")
     return "\n\n".join(blocks)
 
+# === changed: enrich query with scenario/intent & hints ===
 def make_query(user_message: str) -> str:
     slots = st.session_state.flow["slots"]
-    parts = [f"scenario:{st.session_state.flow['scenario']}"]
+    scenario = st.session_state.flow.get("scenario")
+    intent = detect_global_intent(user_message)
+    intent_key = intent["key"] if intent else None
+
+    parts = []
+    if scenario:
+        parts.append(f"scenario:{scenario}")
+    if intent_key:
+        parts.append(f"intent:{intent_key}")
+
     if slots.get("product"): parts.append(f"product:{slots['product']}")
     if slots.get("color"):   parts.append(f"color:{slots['color']}")
     if slots.get("size"):    parts.append(f"size:{slots['size']}")
-    parts.append(f"user:{user_message}")
+
+    # light hints to steer retrieval to the right doc
+    text = _preprocess_user_text(user_message)
+    hint_terms = []
+    if intent_key == "new_arrivals_intent":
+        hint_terms += ["new arrivals", "new collection", "latest drop", "fall collection", "winter collection"]
+    if intent_key == "promotions_intent":
+        hint_terms += ["promotions", "discounts", "WELCOME10", "stacking", "first-time 5%"]
+    if intent_key == "price_intent":
+        hint_terms += ["price range", "typical ranges", "tees", "knitwear", "jackets", "dresses"]
+    if intent_key == "free_returns_intent":
+        hint_terms += ["free returns", "return shipping covered"]
+    if intent_key == "mens_catalog_intent":
+        hint_terms += ["men and women", "men's categories", "shirts", "pants", "jackets", "knitwear"]
+
+    if hint_terms:
+        parts.append("hints:" + ",".join(hint_terms))
+
+    parts.append(f"user:{text}")
     return " | ".join(parts)
+# === end changed ===
 
 
 # =========================
@@ -1205,6 +1254,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
