@@ -760,6 +760,18 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
             return "Happy to help. Anything else you’d like to check?"
         return None
 
+    # ---- New arrivals & collections ----
+    if current_scenario == "New arrivals & collections":
+        flow["stage"] = "end_or_more"
+        return (
+            "Soft Blouse is a cotton-modal with a softly draped silhouette in Ivory, Mist Blue, Rose Beige, and Black. "
+            "City Knit is a cozy wool-blend in Oatmeal, Charcoal, Forest, and Pink. "
+            "Everyday Jacket has clean tailoring in twill/nylon—Sand, Navy, Olive. "
+            "Tailored Pants are cut in stretch twill—Black, Greige, Navy. "
+            "Weekend Dress is fluid modal jersey—Berry, Ink, Cream. "
+            "Want details on a specific item or color?"
+        )
+
     # ---- Shipping & returns ----
     if current_scenario == "Shipping & returns":
         # Shipping question detection — prioritized over return flow
@@ -1348,6 +1360,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
