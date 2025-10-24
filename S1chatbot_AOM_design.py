@@ -274,14 +274,20 @@ def extract_product(t: str):
     if "tee" in low or "t-shirt" in low or "tshirt" in low:
         return "t-shirt"
 
+    # ✅ 여기 추가: shoes / sneakers
+    if re.search(r"\b(running\s+shoes?|sneakers?|shoes?)\b", low, re.I):
+        return "shoes"
+
     # 3) 일반 카테고리(기존 리스트 유지/보강)
-    cats = [
-        "blouse", "skirt", "pants", "cardigan", "cardigans", "sweater", "sweaters",
-        "dress", "dresses", "jumpsuit", "jumpsuits", "jacket", "jackets",
-        "t-shirt", "t-shirts", "sweatshirt", "sweatpants", "outer", "coat",
-        "trench", "trenches", "top", "tops", "bodysuit", "bodysuits",
-        "activewear", "shirt", "shirts", "shorts", "lingerie"
-    ]
+cats = [
+    "blouse", "skirt", "pants", "cardigan", "cardigans", "sweater", "sweaters",
+    "dress", "dresses", "jumpsuit", "jumpsuits", "jacket", "jackets",
+    "t-shirt", "t-shirts", "sweatshirt", "sweatpants", "outer", "coat",
+    "trench", "trenches", "top", "tops", "bodysuit", "bodysuits",
+    "activewear", "shirt", "shirts", "shorts", "lingerie",
+    "shoe", "shoes", "sneaker", "sneakers"
+]
+
     for c in cats:
         if re.search(rf"\b{re.escape(c)}\b", low, re.I):
             if c in ["cardigans", "sweaters", "jackets", "dresses", "tops", "shirts", "jumpsuits"]:
@@ -289,11 +295,14 @@ def extract_product(t: str):
             return c
 
     # 4) 두 단어 조합(느슨)
-    w = re.search(r"\b([\w\-]+(?:\s+[\w\-]+)?)\s+(jacket|skirt|blouse|t-?shirt|dress|pants|sweater)\b", text, re.I)
+    w = re.search(r"\b([\w\-]+(?:\s+[\w\-]+)?)\s+(jacket|skirt|blouse|t-?shirt|dress|pants|sweater|shoes)\b", text, re.I)
     if w:
-        # 예: "chunky knit sweater" → "sweater"로 정리
         noun = w.group(2).lower()
-        return "sweater" if noun in ["sweater"] else noun
+        if noun == "sweater":
+            return "sweater"
+        if noun == "t-shirt":
+            return "t-shirt"
+        return noun
 
     return None
 
@@ -1330,6 +1339,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
