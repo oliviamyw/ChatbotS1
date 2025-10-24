@@ -981,6 +981,13 @@ def inline_answer_shipping(user_text: str) -> str:
         "- International: typically 7–14 business days"
     )
 
+def inline_answer_return_policy(user_text: str) -> str:
+    # free_returns_policy + shipping_returns 요지를 2–3문장으로 요약
+    return (
+        "Returns are accepted within **14 days** of delivery, and items must be **unworn** and in original condition. "
+        "Return **shipping is covered** for defective or wrong-item cases; for fit/changed-mind, coverage can vary by policy or promotion. "
+        "Refunds are typically processed **3–5 business days** after the carrier scans the return."
+    )
 
 def inline_answer_availability(user_text: str) -> str:
     _update_slots_from_text(user_text)
@@ -1113,8 +1120,9 @@ INLINE_HANDLERS = {
     "promotions_intent":   inline_answer_promotions,
     "price_intent":        inline_answer_price,
     "mens_catalog_intent": inline_answer_mens_catalog,
-    "free_returns_intent": inline_answer_free_returns,
+    "returns_intent":      inline_answer_return_policy, 
 }
+
 
 
 # =========================
@@ -1358,6 +1366,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
