@@ -968,12 +968,12 @@ INLINE_HANDLERS = {
 # Orchestrator
 # =========================
 def handle_message(user_text: str) -> str:
-    # 1) Pending yes/no 처리
+    # 1) Handle pending yes/no first
     pending_reply = handle_pending_yes(user_text)
     if pending_reply:
-        return maybe_add_one_time_closing(pending_reply)
+        return maybe_add_one_time_closing(apply_tone_policies(pending_reply))
 
-    # 2) 글로벌 인텐트 감지 및(필요 시) 전환 제안/인라인 응답
+    # 2) Global intent detection and (if needed) inline suggestion / switch prompt
     detected = detect_global_intent(user_text)
     if detected:
         current = st.session_state.flow.get("scenario")
@@ -984,22 +984,22 @@ def handle_message(user_text: str) -> str:
                 if inline_fun:
                     reply = inline_fun(user_text)
                     set_pending("confirm_switch", {"target": target})
-                    return maybe_add_one_time_closing(reply)
+                    return maybe_add_one_time_closing(apply_tone_policies(reply))
             msg = f"It sounds like **{target}** might be more helpful. Switch to that topic?"
             set_pending("confirm_switch", {"target": target})
-            return maybe_add_one_time_closing(msg)
+            return maybe_add_one_time_closing(apply_tone_policies(msg))
 
-    # 3) 현재 시나리오에 대한 규칙 기반 라우팅
+    # 3) Scenario-specific rule routing
     current_scenario = st.session_state.flow.get("scenario")
     rule_reply = route_by_scenario(current_scenario, user_text)
     if rule_reply is not None:
         infer_pending_from_bot_reply(rule_reply)
-        return maybe_add_one_time_closing(rule_reply)
+        return maybe_add_one_time_closing(apply_tone_policies(rule_reply))
 
-    # 4) LLM/RAG 폴백
+    # 4) LLM/RAG fallback
     bot_reply = llm_fallback(user_text)
     infer_pending_from_bot_reply(bot_reply)
-    return maybe_add_one_time_closing(bot_reply)
+    return maybe_add_one_time_closing(apply_tone_policies(bot_reply))
 
 
 # =========================
@@ -1205,6 +1205,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
