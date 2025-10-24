@@ -917,6 +917,41 @@ def inline_answer_size_chart(user_text: str) -> str:
 
 
 # =========================
+# Emoji / tone post-processor
+# =========================
+# Matches most common Unicode emoji ranges
+_EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF]+")
+
+def apply_tone_policies(text: str) -> str:
+    """
+    Tone policy:
+    - formal: remove all emojis
+    - informal: keep at most one emoji and move it to the very end
+    """
+    if not isinstance(text, str) or not text:
+        return text
+
+    # formal: no emojis at all
+    if TONE == "formal":
+        return _EMOJI_RE.sub("", text)
+
+    # informal: allow at most one emoji
+    emojis = list(_EMOJI_RE.finditer(text))
+    if not emojis:
+        return text
+
+    # keep only the first emoji
+    first_emoji = emojis[0].group(0)
+    # remove all emojis from the text
+    cleaned = _EMOJI_RE.sub("", text).rstrip()
+
+    # append one emoji at the very end
+    if cleaned and cleaned[-1] in ".!?":
+        return f"{cleaned} {first_emoji}"
+    return f"{cleaned} {first_emoji}"
+
+
+# =========================
 # Inline handler mapping
 # =========================
 
@@ -1170,6 +1205,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
