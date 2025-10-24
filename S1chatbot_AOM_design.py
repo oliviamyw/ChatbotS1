@@ -860,7 +860,6 @@ def route_by_scenario(current_scenario: str, user_text: str) -> str | None:
 # =========================
 
 GLOBAL_INTENTS = [
-GLOBAL_INTENTS = [
     # New arrivals / collections (cover fall/autumn phrasing too)
     (r"\b(new\s+arrivals?|latest\s+(drop|collection|release)s?|new\s+collection|this\s+(winter|fall|autumn|spring|summer)|"
      r"(winter|fall|autumn)\s+(arrivals?|collection))\b",
@@ -1296,6 +1295,7 @@ with chat_area:
                 """,
                 unsafe_allow_html=True
             )
+
 
 
 
