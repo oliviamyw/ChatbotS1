@@ -1,2 +1,2 @@
 # ChatbotS1
-chatbot_name_picture
+anthro x mass
