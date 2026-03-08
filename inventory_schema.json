@@ -1,0 +1,12 @@
+{
+  "sku": "EJ-SAND-S",
+  "product": "Everyday Jacket",
+  "category": "jacket",
+  "color": "sand",
+  "size": "S",
+  "season": "current",
+  "stock": 7,
+  "low_stock_threshold": 3,
+  "is_last_season": false
+}
+
