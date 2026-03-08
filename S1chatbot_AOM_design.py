@@ -98,7 +98,7 @@ supabase = get_supabase()
 
 # -------------------------
 # -------------------------
-# Study condition (THIS CELL: Mass-Market / 20 years)
+# Study condition (THIS CELL: Start-up / 3 years)
 # -------------------------
 identity_option = "With name and image"   # adjust per cell if needed (e.g., name only, image only, none)
 show_name = True
@@ -107,7 +107,7 @@ CHATBOT_NAME = "Skyler"
 CHATBOT_PICTURE = "https://i.imgur.com/4uLz4FZ.png"
 
 # IMPORTANT: these labels must match your manipulation and what you want stored in Supabase
-brand_type = "Mass-market Brand"             # <-- Mass-market condition label (Supabase 저장값)
+brand_type = "Mass-market Brand"          # <-- Mass-market condition label (Supabase 저장값)
 BRAND_AGE_YEARS_TEXT = "twenty years ago"  # <-- Greeting 문장에 그대로 들어갈 표현
 
 
@@ -697,7 +697,7 @@ def is_specific_availability_query(text: str) -> bool:
 
 
 # -------------------------
-# Availability 상담형 응답: RAG/DB가 없어도 자연스럽게 "필터링/좁혀가기"를 제공
+# Availability 응답: exact inventory DB가 없어도 자연스러운 stock-style reply를 제공
 # -------------------------
 _AVAIL_COLOR_ALIASES = {
     "navy": "navy",
@@ -721,7 +721,13 @@ _AVAIL_ATTR_KEYWORDS = {
     "high_rise": ["high rise", "high-rise"],
     "mid_rise": ["mid rise", "mid-rise"],
     "low_rise": ["low rise", "low-rise"],
+    "maxi": ["maxi"],
+    "midi": ["midi"],
+    "mini": ["mini"],
+    "casual": ["casual", "daytime", "day time", "everyday"],
+    "dressy": ["dressy", "formal", "occasion", "evening"],
 }
+
 
 def _update_availability_state(user_text: str) -> dict:
     state = st.session_state.get("availability_state") or {
@@ -732,26 +738,35 @@ def _update_availability_state(user_text: str) -> dict:
         "turns": 0,
         "disclaimer_shown": False,
     }
-    t = (user_text or "").lower()
+    t = (user_text or "").lower().strip()
+
+    # If the user gives a short follow-up like "yellow" or "yellow ones",
+    # preserve the previously discussed product instead of resetting to a generic category.
+    previous_product = state.get("product")
 
     # broad product inference (run first; can be overridden by more specific matches below)
     if any(w in t for w in [
-        "coat", "coats", "overcoat", "trench", "parka", "puffer", "outerwear", "raincoat", "topcoat"
+        "coat", "coats", "overcoat", "trench", "parka", "puffer", "outerwear", "raincoat", "topcoat", "jacket", "jackets"
     ]):
         state["product"] = "outerwear"
-    if any(w in t for w in ["dress", "dresses", "sundress", "gown", "maxi", "midi"]):
+    if any(w in t for w in ["dress", "dresses", "sundress", "gown", "maxi", "midi", "mini"]):
         state["product"] = "dress"
 
     # product inference
     if any(w in t for w in ["pants", "trousers", "slacks"]):
         state["product"] = "pants"
-    elif any(w in t for w in ["shirt", "shirts", "button-down", "button down", "dress shirt"]):
+    elif any(w in t for w in ["shirt", "shirts", "button-down", "button down", "dress shirt", "blouse", "top", "tops"]):
         state["product"] = "shirt"
     elif any(w in t for w in ["suit", "blazer", "sport coat", "suiting"]):
         state["product"] = "suiting"
 
+    # If user only said "ones" / a color / a size, keep prior product context.
+    if state.get("product") is None and previous_product:
+        if any(word in t for word in ["one", "ones", "that", "those", "yellow", "white", "black", "navy", "blue", "red", "green", "gray", "grey", "beige", "brown", "pink", "purple", "orange", "cream", "ivory"]):
+            state["product"] = previous_product
+
     # colors
-    for k,v in _AVAIL_COLOR_ALIASES.items():
+    for k, v in _AVAIL_COLOR_ALIASES.items():
         if k in t:
             state["colors"].add(v)
 
@@ -769,94 +784,155 @@ def _update_availability_state(user_text: str) -> dict:
     st.session_state["availability_state"] = state
     return state
 
+
 def _availability_next_question(state: dict) -> Optional[str]:
-    # Ask at most one next question, prioritized to reduce loops.
+    """Ask only one light follow-up, focused on checking availability rather than recommending."""
+    product = state.get("product")
+    colors = state.get("colors", set())
+    size = state.get("size")
     attrs = state.get("attrs", set())
-    has_fit_pref = ("slim" in attrs) or ("regular" in attrs)
 
-    if state.get("product") == "pants":
-        if "pleated" in attrs:
-            return "Do you prefer a **single pleat** (subtle) or **double pleat** (more structure)?"
-        if "european" in attrs and (not has_fit_pref):
-            return "For a European look, would you prefer a **slim-tapered** fit or a more **classic/regular** fit?"
-        if not has_fit_pref:
-            return "Do you want a **slim-tapered** fit or a more **classic/regular** fit?"
-        # Next-best narrowing once fit is known
-        if not state.get("colors"):
-            return "Any color preference, such as **navy**, **black**, or **khaki**?"
-        return "Do you prefer a **mid-rise** or **high-rise**, or should the focus stay on a clean, classic look?"
-    if state.get("product") == "shirt":
-        if not has_fit_pref:
-            return "Do you prefer a **slim** fit or a more **regular** fit?"
-        # Next-best narrowing once fit is known
-        if not state.get("colors"):
-            return "Any color preference, such as **white**, **light blue**, or **navy**?"
-        return "Do you prefer a **crisper** feel or something **softer and more comfortable**?"
-    if state.get("product") == "outerwear":
-        return "What type of coat are you looking for: **wool overcoat**, **trench**, or **puffer/parka**?"
-    if state.get("product") == "dress":
-        if not state.get("colors"):
-            return "Any color preference, and do you prefer a **midi** or **maxi** length?"
-        return "Is this for a casual daytime look or a more **dressy** occasion?"
-    if state.get("product") == "suiting":
-        return "Are you looking for a **blazer/sport coat** or a full **suit**?"
-    return "Are you shopping for **tops**, **bottoms**, **outerwear**, or **dresses**?"
+    if not product:
+        return "Would you like me to check **dresses**, **tops**, **bottoms**, or **outerwear**?"
 
-def build_availability_consult_reply(user_text: str) -> str:
-    prefix = pick_ack(int(st.session_state.get("bot_turns", 0) + 1))
-    state = _update_availability_state(user_text)
+    if product == "dress":
+        if not colors:
+            return "Would you like me to check a specific color as well?"
+        if size is None:
+            return "Would you like me to check a particular size too?"
+        return "Would you like me to check another color or size as well?"
 
-    t = (user_text or "").lower()
-    is_count_q = bool(re.search(r"\bhow many\b|\bnumber of\b|\bstock count\b|\bhow many\b.*\bin stock\b", t))
+    if product == "outerwear":
+        if not colors:
+            return "Would you like to check a specific color as well?"
+        if size is None:
+            return "Would you like me to check a particular size too?"
+        return "Would you like to check another coat style, color, or size as well?"
 
-    # short summary (no fake inventory counts)
+    if product == "pants":
+        if not colors:
+            return "Would you like to check a specific color as well?"
+        if size is None:
+            return "Would you like me to check a particular size too?"
+        return "Would you like me to check another color or size too?"
+
+    if product in {"shirt", "suiting"}:
+        if not colors:
+            return "Would you like me to check a specific color as well?"
+        if size is None:
+            return "Would you like me to check a particular size too?"
+        return "Would you like me to check another style, color, or size too?"
+
+    return "Would you like me to check a specific color or size as well?"
+
+
+def _availability_summary(state: dict) -> str:
     product = state.get("product")
     colors = sorted(list(state.get("colors", set())))
     size = state.get("size")
     attrs = state.get("attrs", set())
 
-    bits = []
     if product == "pants":
-        bits.append("tailored trousers")
+        noun = "trousers"
     elif product == "shirt":
-        bits.append("dress shirts")
+        noun = "shirts"
     elif product == "suiting":
-        bits.append("suiting pieces")
+        noun = "suiting pieces"
     elif product == "outerwear":
-        bits.append("men's coats")
+        noun = "coats"
     elif product == "dress":
-        bits.append("dresses")
+        noun = "dresses"
     else:
-        bits.append("items")
+        noun = "items"
 
+    bits = []
     if colors:
-        bits.append("in " + " and ".join(colors))
+        bits.append(" ".join(colors) + f" {noun}")
+    else:
+        bits.append(noun)
+
+    if "maxi" in attrs:
+        bits.append("in a maxi length")
+    elif "midi" in attrs:
+        bits.append("in a midi length")
+    elif "mini" in attrs:
+        bits.append("in a mini length")
+
     if size:
-        bits.append(f"(size {size})")
-    if "european" in attrs:
-        bits.append("with a European-style silhouette")
+        bits.append(f"in size {size}")
     if "pleated" in attrs:
         bits.append("with pleats")
+    if "european" in attrs:
+        bits.append("with a European-style look")
+    if "casual" in attrs:
+        bits.append("for a casual daytime look")
+    elif "dressy" in attrs:
+        bits.append("for a dressier occasion")
 
-    summary = " ".join(bits).strip()
+    return " ".join(bits).strip()
 
-    # Guidance: show full disclaimer once per availability flow to prevent repetitive loops.
-    if not state.get("disclaimer_shown"):
-        guidance = (
-            "I can help you narrow down what to look for. "
-            "This chat cannot display a live product list or exact stock counts, but you can use the filters on the product page to match your preferences."
-        )
-        state["disclaimer_shown"] = True
-        st.session_state["availability_state"] = state
-    else:
-        guidance = "I can help you narrow it down using one quick filter."
 
+def build_availability_consult_reply(user_text: str) -> str:
+    """Study 1 availability should sound like flexible stock checking, not a recommendation bot."""
+    state = _update_availability_state(user_text)
+    t = (user_text or "").lower()
+
+    is_count_q = bool(re.search(r"\bhow many\b|\bnumber of\b|\bstock count\b|\bin stock\b", t))
+    has_color = bool(state.get("colors"))
+    has_size = bool(state.get("size"))
+    has_attrs = bool(state.get("attrs"))
+    has_specifics = has_color or has_size or has_attrs
+    summary = _availability_summary(state)
     q = _availability_next_question(state)
+    product = state.get("product")
 
     if is_count_q:
-        return f"{prefix} I can’t see a live stock count inside this chat. For {summary}, the fastest approach is filtering by category and size on the product page. {guidance} {q}".strip()
+        if has_specifics:
+            lead = f"We currently have limited to moderate stock for {summary}."
+        elif product == "dress":
+            lead = "We currently have several women's dresses in stock."
+        elif product == "outerwear":
+            lead = "We currently have several outerwear options in stock."
+        elif product == "pants":
+            lead = "We currently have several trouser options in stock."
+        elif product == "shirt":
+            lead = "We currently have several shirt options in stock."
+        elif product == "suiting":
+            lead = "We currently have several suiting options in stock."
+        else:
+            lead = "We currently have several options available in that category."
+        return f"{lead} {q}".strip()
 
-    return f"{prefix} For {summary}, {guidance} {q}".strip()
+    if product == "dress":
+        if has_specifics:
+            lead = f"Yes, we currently have a few {summary} available."
+        else:
+            lead = "Yes, we currently have several women's dresses available."
+    elif product == "outerwear":
+        if has_specifics:
+            lead = f"Yes, we currently have a few {summary} available."
+        else:
+            lead = "Yes, we currently have several outerwear options available."
+    elif product == "pants":
+        if has_specifics:
+            lead = f"Yes, we currently have a few {summary} available."
+        else:
+            lead = "Yes, we currently have several trouser options available."
+    elif product == "shirt":
+        if has_specifics:
+            lead = f"Yes, we currently have a few {summary} available."
+        else:
+            lead = "Yes, we currently have several shirt options available."
+    elif product == "suiting":
+        if has_specifics:
+            lead = f"Yes, we currently have a few {summary} available."
+        else:
+            lead = "Yes, we currently have several suiting options available."
+    else:
+        lead = "Yes, we currently have several options available in that category."
+
+    return f"{lead} {q}".strip()
+
 
 def generate_answer(user_text: str, scenario: Optional[str]) -> Tuple[str, str, bool]:
     intent_key = scenario_to_intent(scenario)
@@ -1029,7 +1105,7 @@ def log_session_start_once():
         "session_id": st.session_state.session_id,
         "ts_start": ts_now,
         "identity_option": identity_option,
-        "brand_type": brand_type, 
+        "brand_type": brand_type,  # <-- Start-up Brand로 저장됨
         "name_present": "present" if show_name else "absent",
         "picture_present": "present" if show_picture else "absent",
     }).execute()
@@ -1046,7 +1122,7 @@ if not st.session_state.greeted_once:
     greet_text = (
         "Hi, I'm Skyler, Style Loom’s virtual assistant. "
         "Style Loom is a mass-market fashion brand founded twenty years ago, "
-        "known for its accessibility and broad consumer reach. "
+        "known for its accessible style and broad consumer reach. "
         "I’m here to help with your shopping."
     )
     st.session_state.chat_history.append((chatbot_speaker(), greet_text))
@@ -1254,8 +1330,6 @@ if user_text and not st.session_state.ended:
     st.session_state.bot_turns += 1
 
     st.rerun()
-
-
 
 
 
