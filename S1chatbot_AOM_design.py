@@ -100,14 +100,14 @@ supabase = get_supabase()
 # -------------------------
 # Study condition (THIS CELL: Start-up / 3 years)
 # -------------------------
-identity_option = "With name and image"   # adjust per cell if needed (e.g., name only, image only, none)
+identity_option = "With name and image"
 show_name = True
 show_picture = True
 CHATBOT_NAME = "Skyler"
 CHATBOT_PICTURE = "https://i.imgur.com/4uLz4FZ.png"
 
 # IMPORTANT: these labels must match your manipulation and what you want stored in Supabase
-brand_type = "Mass-market Brand"          # <-- Mass-market condition label (Supabase 저장값)
+brand_type = "Mass-market Brand"             # <-- Start-up condition label (Supabase 저장값)
 BRAND_AGE_YEARS_TEXT = "twenty years ago"  # <-- Greeting 문장에 그대로 들어갈 표현
 
 
@@ -527,7 +527,7 @@ def detect_subintent(user_text: str, intent_key: Optional[str], active_item: Opt
 
 
 def pick_ack(turn_index: int) -> str:
-    return ACK_ROTATION[turn_index % len(ACK_ROTATION)]
+    return ""
 
 
 def extract_last_question(text_block: str) -> Optional[str]:
@@ -631,15 +631,19 @@ def answer_fallback(user_text: str, intent_key: Optional[str] = None) -> str:
 
 
 # -------------------------
-# Availability query specificity (to avoid triggering the fixed 5+ script on broad assortment questions)
+# Availability helpers (Study 1: stock-style responses, no short echoing)
 # -------------------------
 COLOR_WORDS = [
     "black","white","navy","blue","red","green","gray","grey","beige","brown","pink","purple","yellow","orange","cream","ivory"
 ]
 
-# Size extraction: avoid false matches like the possessive "'s" in "women's"
+# Explicit size extraction (avoid false positives like the possessive "women's")
 _SIZE_ALPHA_CTX_RE = re.compile(
-    r"(?:\bsize\b|\bin\s+(?:a\s+)?size\b|\bsize:\b)\s*(xs|s|m|l|xl|x-?large|small|medium|large)\b",
+    r"(?:\bsize\b|\bin\s+(?:a\s+)?size\b|\bsize:\b)\s*(xxs|xs|s|m|l|xl|xxl|x-?large|small|medium|large)\b",
+    re.IGNORECASE
+)
+_SIZE_ALPHA_TRAILING_RE = re.compile(
+    r"\b(xxsmall|xxs|xsmall|xs|small|medium|large|xxl|xl|xx-large|x-large|xlarge|m|l|s)\b\s*(?:size|sized)?\b",
     re.IGNORECASE
 )
 _SIZE_NUM_CTX_RE = re.compile(
@@ -647,291 +651,173 @@ _SIZE_NUM_CTX_RE = re.compile(
     re.IGNORECASE
 )
 _SIZE_SLASH_RE = re.compile(r"\b\d{1,2}/\d{1,2}\b")
+_BARE_SIZE_RE = re.compile(r"^\s*(?:a\s+|an\s+|size\s+|in\s+)?(xxs|xs|s|m|l|xl|xxl|small|medium|large)(?:\s+please)?\s*[.!?]*\s*$", re.IGNORECASE)
+
+SIZE_NORMALIZE = {
+    "xxs": "XXS", "xs": "XS", "s": "S", "m": "M", "l": "L", "xl": "XL", "xxl": "XXL",
+    "small": "small", "medium": "medium", "large": "large", "x-large": "XL", "xlarge": "XL",
+}
+
+PRODUCT_PATTERNS = {
+    "dress": ["dress", "dresses", "sundress", "gown", "maxi", "midi"],
+    "top": ["top", "tops", "blouse", "blouses", "shirt", "shirts", "tee", "t-shirt", "sweater", "cardigan"],
+    "bottom": ["pants", "trousers", "slacks", "jeans", "skirt", "bottoms"],
+    "outerwear": ["coat", "coats", "jacket", "jackets", "outerwear", "parka", "trench", "overcoat", "puffer"],
+}
+
+PRODUCT_LABELS = {
+    "dress": "women's dresses",
+    "top": "tops",
+    "bottom": "bottoms",
+    "outerwear": "outerwear",
+}
+
 
 def extract_size(text: str) -> Optional[str]:
-    """Extract a size only when the user explicitly indicates a size."""
     t = (text or "").strip().lower()
     if not t:
         return None
-
-    # Common W/L style (e.g., 34/34) often appears without the word "size"
     m = _SIZE_SLASH_RE.search(t)
     if m:
         return m.group(0)
-
-    # Numeric sizes when explicitly indicated
     m = _SIZE_NUM_CTX_RE.search(t)
     if m:
         return m.group(1)
-
-    # Alpha sizes when explicitly indicated
     m = _SIZE_ALPHA_CTX_RE.search(t)
     if m:
-        return m.group(1)
-
+        raw = m.group(1).lower().replace(" ", "")
+        return SIZE_NORMALIZE.get(raw, m.group(1))
+    m = _SIZE_ALPHA_TRAILING_RE.search(t)
+    if m:
+        raw = m.group(1).lower().replace(" ", "")
+        return SIZE_NORMALIZE.get(raw, m.group(1))
     return None
+
+
+
+def extract_size_for_availability(text: str, has_active_product: bool = False) -> Optional[str]:
+    explicit = extract_size(text)
+    if explicit:
+        return explicit
+    if has_active_product:
+        raw_t = (text or "").strip().lower()
+        m = _BARE_SIZE_RE.match(raw_t)
+        if m:
+            raw = m.group(1).lower().replace(" ", "")
+            return SIZE_NORMALIZE.get(raw, m.group(1))
+        short_tokens = re.findall(r"[a-zA-Z]+", raw_t)
+        if 1 <= len(short_tokens) <= 3:
+            for tok in short_tokens:
+                if tok in SIZE_NORMALIZE:
+                    return SIZE_NORMALIZE[tok]
+    return None
+
+def detect_product_type(text: str) -> Optional[str]:
+    t = (text or "").lower()
+    for key, kws in PRODUCT_PATTERNS.items():
+        if any(kw in t for kw in kws):
+            return key
+    return None
+
+
+def detect_color(text: str) -> Optional[str]:
+    t = (text or "").lower()
+    for c in COLOR_WORDS:
+        if c in t:
+            return c
+    return None
+
+
+def is_size_chart_query(text: str) -> bool:
+    t = (text or "").lower()
+    phrases = [
+        "size chart", "sizing chart", "size guide", "sizing guide", "fit guide",
+        "measurements", "measurement", "size info", "sizing info"
+    ]
+    return any(p in t for p in phrases)
 
 def is_specific_availability_query(text: str) -> bool:
     t = (text or "").lower()
-
     has_size = bool(extract_size(t))
     has_color = any(c in t for c in COLOR_WORDS)
-
-    # Product / item mention (broad)
-    has_item = any(w in t for w in [
-        "dress","party dress","shirt","t-shirt","tee","top","jacket","coat","pants","trousers","joggers","leggings",
-        "hoodie","sweater","cardigan","skirt","blazer","outerwear"
-    ])
-
-    # Broad assortment phrasing (should NOT trigger fixed 5+)
+    has_item = detect_product_type(t) is not None
     broad = any(p in t for p in [
         "what different", "what kinds", "what type", "what types", "what do you have", "different product",
         "product availability", "available products", "different color", "different colors", "what colors", "colors do you have"
     ])
-
     if broad and not (has_size or has_color):
         return False
-
     return has_item and (has_size or has_color)
-
-
-
-# -------------------------
-# Availability 응답: exact inventory DB가 없어도 자연스러운 stock-style reply를 제공
-# -------------------------
-_AVAIL_COLOR_ALIASES = {
-    "navy": "navy",
-    "khaki": "khaki",
-    "black": "black",
-    "white": "white",
-    "gray": "gray",
-    "grey": "gray",
-    "beige": "beige",
-    "ivory": "ivory",
-    "blue": "blue",
-    "brown": "brown",
-    "green": "green",
-}
-_AVAIL_ATTR_KEYWORDS = {
-    "pleated": ["pleat", "pleated", "pleats"],
-    "european": ["european", "euro", "italian", "french"],
-    "slim": ["slim", "trim"],
-    "tapered": ["taper", "tapered"],
-    "regular": ["regular", "classic"],
-    "high_rise": ["high rise", "high-rise"],
-    "mid_rise": ["mid rise", "mid-rise"],
-    "low_rise": ["low rise", "low-rise"],
-    "maxi": ["maxi"],
-    "midi": ["midi"],
-    "mini": ["mini"],
-    "casual": ["casual", "daytime", "day time", "everyday"],
-    "dressy": ["dressy", "formal", "occasion", "evening"],
-}
 
 
 def _update_availability_state(user_text: str) -> dict:
     state = st.session_state.get("availability_state") or {
-        "product": None,       # e.g., pants, shirt, outerwear, dress, suiting
-        "colors": set(),
-        "size": None,          # raw size string
-        "attrs": set(),        # e.g., pleated, european
-        "turns": 0,
-        "disclaimer_shown": False,
+        "product": None,
+        "color": None,
+        "size": None,
     }
-    t = (user_text or "").lower().strip()
-
-    # If the user gives a short follow-up like "yellow" or "yellow ones",
-    # preserve the previously discussed product instead of resetting to a generic category.
-    previous_product = state.get("product")
-
-    # broad product inference (run first; can be overridden by more specific matches below)
-    if any(w in t for w in [
-        "coat", "coats", "overcoat", "trench", "parka", "puffer", "outerwear", "raincoat", "topcoat", "jacket", "jackets"
-    ]):
-        state["product"] = "outerwear"
-    if any(w in t for w in ["dress", "dresses", "sundress", "gown", "maxi", "midi", "mini"]):
-        state["product"] = "dress"
-
-    # product inference
-    if any(w in t for w in ["pants", "trousers", "slacks"]):
-        state["product"] = "pants"
-    elif any(w in t for w in ["shirt", "shirts", "button-down", "button down", "dress shirt", "blouse", "top", "tops"]):
-        state["product"] = "shirt"
-    elif any(w in t for w in ["suit", "blazer", "sport coat", "suiting"]):
-        state["product"] = "suiting"
-
-    # If user only said "ones" / a color / a size, keep prior product context.
-    if state.get("product") is None and previous_product:
-        if any(word in t for word in ["one", "ones", "that", "those", "yellow", "white", "black", "navy", "blue", "red", "green", "gray", "grey", "beige", "brown", "pink", "purple", "orange", "cream", "ivory"]):
-            state["product"] = previous_product
-
-    # colors
-    for k, v in _AVAIL_COLOR_ALIASES.items():
-        if k in t:
-            state["colors"].add(v)
-
-    # sizes
-    sz = extract_size(t)
-    if sz:
-        state["size"] = sz
-
-    # attributes
-    for attr, kws in _AVAIL_ATTR_KEYWORDS.items():
-        if any(kw in t for kw in kws):
-            state["attrs"].add(attr)
-
-    state["turns"] = int(state.get("turns", 0)) + 1
+    t = (user_text or "").lower()
+    product = detect_product_type(t)
+    if product:
+        state["product"] = product
+    color = detect_color(t)
+    if color:
+        state["color"] = color
+    size = extract_size_for_availability(t, has_active_product=bool(state.get("product")))
+    if size:
+        state["size"] = size
     st.session_state["availability_state"] = state
     return state
 
 
-def _availability_next_question(state: dict) -> Optional[str]:
-    """Ask only one light follow-up, focused on checking availability rather than recommending."""
+AVAILABILITY_COLOR_OPTIONS = {
+    "dress": ["white", "black", "navy", "red", "pink", "yellow", "cream"],
+    "top": ["white", "light blue", "navy", "black", "gray"],
+    "bottom": ["black", "navy", "khaki", "gray", "brown"],
+    "outerwear": ["black", "camel", "navy", "olive", "gray"],
+}
+
+def build_availability_stock_reply(user_text: str) -> str:
+    state = _update_availability_state(user_text)
     product = state.get("product")
-    colors = state.get("colors", set())
+    color = state.get("color")
     size = state.get("size")
-    attrs = state.get("attrs", set())
+    t = (user_text or "").lower()
+    asks_how_many = any(p in t for p in ["how many", "how much stock", "in stock", "stock left", "left in stock"])
+    asks_colors = any(p in t for p in ["what other colors", "other colors", "what colors", "which colors", "available colors", "color options", "colour options", "what colour"])
 
     if not product:
-        return "Would you like me to check **dresses**, **tops**, **bottoms**, or **outerwear**?"
+        return "Yes, we currently have several options available in that category. Would you like to check dresses, tops, bottoms, or outerwear?"
 
-    if product == "dress":
-        if not colors:
-            return "Would you like me to check a specific color as well?"
-        if size is None:
-            return "Would you like me to check a particular size too?"
-        return "Would you like me to check another color or size as well?"
+    label = PRODUCT_LABELS.get(product, "items")
 
-    if product == "outerwear":
-        if not colors:
-            return "Would you like to check a specific color as well?"
-        if size is None:
-            return "Would you like me to check a particular size too?"
-        return "Would you like to check another coat style, color, or size as well?"
+    if asks_colors:
+        options = AVAILABILITY_COLOR_OPTIONS.get(product, ["black", "white", "navy", "gray"])
+        if color and color in options:
+            others = [c for c in options if c != color]
+            if others:
+                listed = ", ".join(others[:-1]) + (f", and {others[-1]}" if len(others) > 1 else others[0])
+                return f"For {label}, besides {color}, we commonly carry colors such as {listed}. I can also check a particular size if you'd like."
+        listed = ", ".join(options[:-1]) + (f", and {options[-1]}" if len(options) > 1 else options[0])
+        return f"For {label}, we commonly carry colors such as {listed}. I can also check a particular size if you'd like."
 
-    if product == "pants":
-        if not colors:
-            return "Would you like to check a specific color as well?"
-        if size is None:
-            return "Would you like me to check a particular size too?"
-        return "Would you like me to check another color or size too?"
-
-    if product in {"shirt", "suiting"}:
-        if not colors:
-            return "Would you like me to check a specific color as well?"
-        if size is None:
-            return "Would you like me to check a particular size too?"
-        return "Would you like me to check another style, color, or size too?"
-
-    return "Would you like me to check a specific color or size as well?"
-
-
-def _availability_summary(state: dict) -> str:
-    product = state.get("product")
-    colors = sorted(list(state.get("colors", set())))
-    size = state.get("size")
-    attrs = state.get("attrs", set())
-
-    if product == "pants":
-        noun = "trousers"
-    elif product == "shirt":
-        noun = "shirts"
-    elif product == "suiting":
-        noun = "suiting pieces"
-    elif product == "outerwear":
-        noun = "coats"
-    elif product == "dress":
-        noun = "dresses"
-    else:
-        noun = "items"
-
-    bits = []
-    if colors:
-        bits.append(" ".join(colors) + f" {noun}")
-    else:
-        bits.append(noun)
-
-    if "maxi" in attrs:
-        bits.append("in a maxi length")
-    elif "midi" in attrs:
-        bits.append("in a midi length")
-    elif "mini" in attrs:
-        bits.append("in a mini length")
-
+    if color and size:
+        size_text = size if size in {"small", "medium", "large"} else size
+        if asks_how_many:
+            return f"It looks like we currently have 5+ {color} {label} available in {size_text}, so stock seems fairly open right now."
+        return f"Yes, it looks like we currently have 5+ {color} {label} available in {size_text}, so stock seems fairly open right now. I can also check another color or size if you'd like."
+    if color:
+        if asks_how_many:
+            return f"It looks like we currently have a few {color} {label} available right now. If you'd like, I can also check a particular size."
+        return f"Yes, we currently have a few {color} {label} available right now. If you'd like, I can also check a particular size."
     if size:
-        bits.append(f"in size {size}")
-    if "pleated" in attrs:
-        bits.append("with pleats")
-    if "european" in attrs:
-        bits.append("with a European-style look")
-    if "casual" in attrs:
-        bits.append("for a casual daytime look")
-    elif "dressy" in attrs:
-        bits.append("for a dressier occasion")
-
-    return " ".join(bits).strip()
-
-
-def build_availability_consult_reply(user_text: str) -> str:
-    """Study 1 availability should sound like flexible stock checking, not a recommendation bot."""
-    state = _update_availability_state(user_text)
-    t = (user_text or "").lower()
-
-    is_count_q = bool(re.search(r"\bhow many\b|\bnumber of\b|\bstock count\b|\bin stock\b", t))
-    has_color = bool(state.get("colors"))
-    has_size = bool(state.get("size"))
-    has_attrs = bool(state.get("attrs"))
-    has_specifics = has_color or has_size or has_attrs
-    summary = _availability_summary(state)
-    q = _availability_next_question(state)
-    product = state.get("product")
-
-    if is_count_q:
-        if has_specifics:
-            lead = f"We currently have limited to moderate stock for {summary}."
-        elif product == "dress":
-            lead = "We currently have several women's dresses in stock."
-        elif product == "outerwear":
-            lead = "We currently have several outerwear options in stock."
-        elif product == "pants":
-            lead = "We currently have several trouser options in stock."
-        elif product == "shirt":
-            lead = "We currently have several shirt options in stock."
-        elif product == "suiting":
-            lead = "We currently have several suiting options in stock."
-        else:
-            lead = "We currently have several options available in that category."
-        return f"{lead} {q}".strip()
-
-    if product == "dress":
-        if has_specifics:
-            lead = f"Yes, we currently have a few {summary} available."
-        else:
-            lead = "Yes, we currently have several women's dresses available."
-    elif product == "outerwear":
-        if has_specifics:
-            lead = f"Yes, we currently have a few {summary} available."
-        else:
-            lead = "Yes, we currently have several outerwear options available."
-    elif product == "pants":
-        if has_specifics:
-            lead = f"Yes, we currently have a few {summary} available."
-        else:
-            lead = "Yes, we currently have several trouser options available."
-    elif product == "shirt":
-        if has_specifics:
-            lead = f"Yes, we currently have a few {summary} available."
-        else:
-            lead = "Yes, we currently have several shirt options available."
-    elif product == "suiting":
-        if has_specifics:
-            lead = f"Yes, we currently have a few {summary} available."
-        else:
-            lead = "Yes, we currently have several suiting options available."
-    else:
-        lead = "Yes, we currently have several options available in that category."
-
-    return f"{lead} {q}".strip()
+        size_text = size if size in {"small", "medium", "large"} else size
+        if asks_how_many:
+            return f"It looks like we currently have several {label} available in {size_text}. If you'd like, I can also check a color."
+        return f"Yes, we currently have several {label} available in {size_text}. If you'd like, I can also check a color."
+    if asks_how_many:
+        return f"It looks like we currently have several {label} available right now. If you'd like, I can also check a specific color or size."
+    return f"Yes, we currently have several {label} available right now. If you'd like, I can also check a specific color or size."
 
 
 def generate_answer(user_text: str, scenario: Optional[str]) -> Tuple[str, str, bool]:
@@ -983,10 +869,29 @@ def generate_answer(user_text: str, scenario: Optional[str]) -> Tuple[str, str, 
         return answer_fallback(user_text, intent_key=used_intent), used_intent, False
 
     # -------------------------
-    # Availability: 상담형(컨설팅) 응답으로 전환 (DB/RAG 없을 때도 반복 루프 방지)
+    # Availability: stock-style responses for Study 1, but allow size-chart questions to use KB
     # -------------------------
+    if intent_key == "availability" and is_size_chart_query(user_text):
+        ctx = load_intent_files_as_context("size_fit")
+        if ctx.strip():
+            ans = answer_grounded(
+                user_text,
+                ctx,
+                intent_key="size_fit",
+                subintent=None,
+                recent_history=recent_history,
+                pending_question=pending_q,
+                include_ack=False,
+            )
+            st.session_state["last_kb_context"] = ctx
+            st.session_state["last_intent_used"] = "size_fit"
+            st.session_state["last_subintent_used"] = None
+            return ans, "size_fit", True
+        intent_key = "size_fit"
+        subintent = None
+
     if intent_key == "availability":
-        reply = build_availability_consult_reply(user_text)
+        reply = build_availability_stock_reply(user_text)
         st.session_state["last_kb_context"] = ""
         st.session_state["last_intent_used"] = intent_key
         st.session_state["last_subintent_used"] = subintent
@@ -1029,9 +934,7 @@ def generate_answer(user_text: str, scenario: Optional[str]) -> Tuple[str, str, 
     # 3) Fallback when nothing is available
     if not context.strip():
         if intent_key == "availability":
-            prefix = pick_ack(int(st.session_state.get("bot_turns", 0) + 1))
             reply = (
-                f"{prefix} "
                 "We offer a range of items across key categories. "
                 "Is there a specific item, color, or size you are looking for?"
             )
@@ -1122,7 +1025,7 @@ if not st.session_state.greeted_once:
     greet_text = (
         "Hi, I'm Skyler, Style Loom’s virtual assistant. "
         "Style Loom is a mass-market fashion brand founded twenty years ago, "
-        "known for its accessible style and broad consumer reach. "
+        "known for its accessibility and broad consumer reach. "
         "I’m here to help with your shopping."
     )
     st.session_state.chat_history.append((chatbot_speaker(), greet_text))
@@ -1330,9 +1233,6 @@ if user_text and not st.session_state.ended:
     st.session_state.bot_turns += 1
 
     st.rerun()
-
-
-
 
 
 
